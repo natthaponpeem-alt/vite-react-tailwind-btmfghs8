@@ -211,11 +211,27 @@ export default function App() {
   }, [user]);
 
   // --- DATA MUTATION HELPERS (ดันข้อมูลขึ้น Cloud อัตโนมัติ) ---
+  // Sanitize: Firestore reject undefined → convert to null or remove
+  const sanitizeForFirestore = (obj) => {
+    if (obj === undefined) return null;
+    if (obj === null) return null;
+    if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
+    if (typeof obj === 'object') {
+      const cleaned = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (v !== undefined) cleaned[k] = sanitizeForFirestore(v);
+      }
+      return cleaned;
+    }
+    return obj;
+  };
+
   const syncToCloud = async (patch) => {
     if (!user) return;
     setIsSyncing(true);
     try {
-      await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'main'), patch, { merge: true });
+      const clean = sanitizeForFirestore(patch);
+      await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'main'), clean, { merge: true });
     } catch (e) {
       console.error(e);
       showToast('Sync ล้มเหลว', 'error');
