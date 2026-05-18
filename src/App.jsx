@@ -98,6 +98,65 @@ function getPortfolioBalance(products, clips, days = 30) { const byCat = { A: 0,
 function getBlendedCommission(products, clips, days = 30) { let weightedSum = 0, totalGMV = 0; const breakdown = []; products.forEach(p => { const sales = getProductSales(p, clips, days); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; breakdown.push({ product: p, gmv: sales.primary, commission: c, contribution: sales.primary * c }); } }); if (totalGMV === 0) return null; const blended = weightedSum / totalGMV; breakdown.sort((a, b) => b.contribution - a.contribution); return { blended: Math.round(blended * 10) / 10, target: BLENDED_COMMISSION_TARGET, totalGMV, breakdown }; }
 
 // Cut Decision Helper (Round 1) — find products meeting "ตัด" criteria
+// A Stack Priority (Round 2) — rank A products by GMV + assign frequency tier
+function getAStack(products, clips) {
+  const aProducts = products.filter(p => p.category === 'A');
+  const withData = aProducts.map(p => {
+    const sales30d = getProductSales(p, clips, 30).primary;
+    const sales7d = getProductSales(p, clips, 7).primary;
+    const daily7d = sales7d / 7;
+    const daily30d = sales30d / 30;
+    const momentum = daily30d > 0 ? daily7d / daily30d : 1;
+    // Count clips this month
+    const monthKey = currentMonth();
+    const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length;
+    const revPerClip = sales30d > 0 && clipsThisMonth > 0 ? sales30d / Math.max(clipsThisMonth, 1) : 0;
+    return { product: p, sales30d, sales7d, momentum, clipsThisMonth, revPerClip };
+  }).sort((a, b) => b.sales30d - a.sales30d);
+
+  return withData.map((s, i) => {
+    let tier, frequency, targetMonth;
+    if (i < 2) { tier = 'HOT'; frequency = '3-4 คลิป/สัปดาห์'; targetMonth = 14; }
+    else if (i < 4) { tier = 'STEADY'; frequency = '1-2 คลิป/สัปดาห์'; targetMonth = 6; }
+    else { tier = 'PASSIVE'; frequency = '2-3 คลิป/เดือน'; targetMonth = 2.5; }
+    const atRisk = s.momentum > 0 && s.momentum < 0.8;
+    return { ...s, rank: i + 1, tier, frequency, targetMonth, atRisk };
+  });
+}
+
+// E Detection (Round 2) — find Winning Product candidates in B/C/D
+function getECandidates(products, clips) {
+  return products.map(p => {
+    if (p.category === 'A') return null; // Already in A
+    const ageDays = daysSince(p.createdAt);
+    if (ageDays < 14) return null; // Too new — let it prove first
+    const sales = getProductSales(p, clips, 30);
+    const sales30d = sales.primary;
+    const pclips = clips.filter(c => c.productId === p.id);
+    const winnerCount = pclips.filter(c => (Number(c.gmv) || 0) >= WINNER_GMV).length;
+    const rank = Number(p.tiktokRank) || 0;
+    const commission = Number(p.scorecard?.commission) || 0;
+
+    let eScore = 0;
+    const reasons = [];
+    if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)} (mass)`); }
+    else if (sales30d >= 10000) { eScore += 1; reasons.push(`GMV ฿${fmtNum(sales30d)}`); }
+    if (winnerCount >= 2) { eScore += 2; reasons.push(`${winnerCount} winner clips`); }
+    else if (winnerCount === 1) { eScore += 1; reasons.push('1 winner clip'); }
+    if (rank > 0 && rank <= 10) { eScore += 1; reasons.push(`Top #${rank} ตลาด`); }
+    if (commission >= 15) { eScore += 1; reasons.push(`คอม ${commission}% ดี`); }
+    if (p.isShopAds) { eScore += 1; reasons.push('Shop Ads 🛒'); }
+    if (eScore < 2) return null;
+
+    let confidence, advice;
+    if (eScore >= 5) { confidence = 'high'; advice = 'ย้ายเป็น A เพื่อขยี้คอนเทนต์'; }
+    else if (eScore >= 3) { confidence = 'medium'; advice = 'พิจารณาย้าย / เทสต่อ 1-2 wk'; }
+    else { confidence = 'low'; advice = 'มี signal เริ่มต้น — เทสต่อ'; }
+
+    return { product: p, eScore, confidence, reasons, sales30d, winnerCount, advice };
+  }).filter(Boolean).sort((a, b) => b.eScore - a.eScore);
+}
+
 function getProductsToCut(products, clips) {
   return products.map(p => {
     const reasons = [];
@@ -368,7 +427,7 @@ export default function App() {
         {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} />)}
         {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={(pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(p => p !== pid) : [...selectedProduct.pillars, pid]; updateProduct(selectedProduct.id, { pillars: next }); }} onSetCategory={(cat) => updateProduct(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={(painId) => removePain(selectedProduct.id, painId)} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={(angleId) => removeAngle(selectedProduct.id, angleId)} onEditScore={() => setEditScoreProductId(selectedProduct.id)} onEditInfo={() => setEditProductInfoId(selectedProduct.id)} onLock={() => setShowLockProduct(true)} onUnlock={() => unlockProduct(selectedProduct.id)} onDelete={() => deleteProduct(selectedProduct.id)} onAddClip={() => { setClipForVOnly(false); setShowAddClip(true); }} onEditClip={(id) => setEditClipId(id)} showToast={showToast} />)}
         {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={unlockProduct} onLockNew={() => setPage('products')} />)}
-        {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
+        {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPromoteToA={(id) => updateProduct(id, { category: 'A' })} />)}
       </main>
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-stone-200 z-30">
         <div className="max-w-6xl mx-auto grid grid-cols-5 gap-1 px-2 py-2">
@@ -786,7 +845,7 @@ function LockListPage({ lockedProducts, clips, onSelectProduct, onUnlock, onLock
   </div>);
 }
 
-function ClipLogPage({ products, clips, onEditClip, onMakeSimilar, onMarkRepostDone }) {
+function ClipLogPage({ products, clips, onEditClip, onMakeSimilar, onMarkRepostDone, onPromoteToA }) {
   const [view, setView] = useState('log');
   return (<div className="space-y-4">
     <div className="flex items-center justify-between"><h1 className="font-display text-3xl">{view === 'log' ? 'Clip Log' : 'Dashboard'}</h1>
@@ -795,7 +854,7 @@ function ClipLogPage({ products, clips, onEditClip, onMakeSimilar, onMarkRepostD
         <button onClick={() => setView('dashboard')} className={`text-xs px-3 py-1.5 rounded transition ${view === 'dashboard' ? 'bg-stone-900 text-lime-300 font-semibold' : 'text-stone-500'}`}>📊 Dashboard</button>
       </div>
     </div>
-    {view === 'log' ? <LogView products={products} clips={clips} onEditClip={onEditClip} /> : <DashboardView products={products} clips={clips} onMakeSimilar={onMakeSimilar} onEditClip={onEditClip} onMarkRepostDone={onMarkRepostDone} />}
+    {view === 'log' ? <LogView products={products} clips={clips} onEditClip={onEditClip} /> : <DashboardView products={products} clips={clips} onMakeSimilar={onMakeSimilar} onEditClip={onEditClip} onMarkRepostDone={onMarkRepostDone} onPromoteToA={onPromoteToA} />}
   </div>);
 }
 
@@ -859,7 +918,7 @@ function LogView({ products, clips, onEditClip }) {
 
 function Stat({ label, value, highlight }) { return (<div className={`rounded p-1 ${highlight ? 'bg-amber-100' : 'bg-stone-100'}`}><div className="text-[9px] text-stone-500 uppercase">{label}</div><div className={`font-mono ${highlight ? 'font-bold text-amber-700' : ''}`}>{value}</div></div>); }
 
-function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepostDone }) {
+function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepostDone, onPromoteToA }) {
   const [period, setPeriod] = useState('30');
   const days = Number(period);
   const cutoff = Date.now() - days * 86400000;
@@ -942,6 +1001,10 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
   // Cut Decision Helper (Round 1)
   const cutCandidates = useMemo(() => getProductsToCut(products, clips), [products, clips]);
 
+  // A Stack + E Detection (Round 2)
+  const aStack = useMemo(() => getAStack(products, clips), [products, clips]);
+  const eCandidates = useMemo(() => getECandidates(products, clips), [products, clips]);
+
   return (<div className="space-y-4">
     <div className="flex gap-1 justify-end">{[{ id: '7', label: '7 วันล่าสุด' }, { id: '30', label: '30 วันล่าสุด' }, { id: '90', label: '90 วันล่าสุด' }].map(d => (<button key={d.id} onClick={() => setPeriod(d.id)} className={`text-xs px-3 py-1.5 rounded ${period === d.id ? 'bg-stone-900 text-lime-300 font-bold' : 'bg-white border border-stone-200'}`}>{d.label}</button>))}</div>
 
@@ -958,6 +1021,63 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           <div className="absolute top-0 h-full w-px bg-stone-700" style={{ left: `${b.target}%` }} title={`Target ${b.target}%`}></div>
         </div>
         <div className="text-[10px] text-stone-500 mt-0.5">GMV: ฿{fmtNum(b.gmv)}</div>
+      </div>); })}</div>
+    </Card>)}
+
+    {/* A STACK PRIORITY — Round 2 */}
+    {aStack.length > 0 && (<Card>
+      <h3 className="font-display text-base mb-1 flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 A Stack Priority</h3>
+      <p className="text-[10px] text-stone-500 mb-3">จัดความถี่ลงคลิปใน A — top มาแรงลงถี่ที่สุด, ตัวอื่นห้ามทอดทิ้ง</p>
+      <div className="space-y-3">
+        {[{ key: 'HOT', emoji: '🔥', label: 'HOT (ลงถี่สุด)', bg: 'from-rose-50 to-orange-50', border: 'border-rose-200' },
+          { key: 'STEADY', emoji: '⚡', label: 'STEADY', bg: 'from-sky-50 to-blue-50', border: 'border-sky-200' },
+          { key: 'PASSIVE', emoji: '💤', label: 'PASSIVE (รักษาการรับรู้)', bg: 'from-stone-50 to-slate-50', border: 'border-stone-200' }].map(group => {
+          const items = aStack.filter(s => s.tier === group.key);
+          if (items.length === 0) return null;
+          return (<div key={group.key}>
+            <div className="text-[10px] font-bold text-stone-600 uppercase tracking-wider mb-1.5">{group.emoji} {group.label}</div>
+            <div className="space-y-1.5">{items.map(s => { const progress = Math.min(100, Math.round((s.clipsThisMonth / s.targetMonth) * 100)); return (<div key={s.product.id} className={`p-2.5 bg-gradient-to-r ${group.bg} border ${group.border} rounded`}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-stone-500 font-display text-sm">#{s.rank}</span>
+                  <span className="font-semibold text-sm truncate">{truncate(s.product.name, 22)}</span>
+                  {s.atRisk && <span className="text-[9px] font-bold bg-rose-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">⚠️ AT RISK</span>}
+                  {s.product.isShopAds && <span className="text-[9px] bg-red-600 text-white px-1 rounded flex-shrink-0">🛒</span>}
+                </div>
+              </div>
+              <div className="text-[10px] text-stone-600 mb-1.5 flex flex-wrap gap-x-2">
+                <span className="font-mono">฿{fmtNum(s.sales30d)}/30d</span>
+                {s.momentum > 0 && s.momentum !== 1 && <span className={`font-mono ${s.momentum > 1.1 ? 'text-emerald-600' : s.momentum < 0.8 ? 'text-rose-600' : 'text-stone-500'}`}>{s.momentum > 1 ? '↗' : '↘'} {Math.round((s.momentum - 1) * 100)}%</span>}
+                <span>📅 {s.frequency}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-1.5 bg-white rounded-full overflow-hidden">
+                  <div className={`h-full ${progress >= 100 ? 'bg-emerald-500' : progress >= 50 ? 'bg-lime-400' : 'bg-amber-400'}`} style={{ width: `${progress}%` }}></div>
+                </div>
+                <span className="text-[10px] font-mono text-stone-600 flex-shrink-0">{s.clipsThisMonth}/{Math.round(s.targetMonth)} ({progress}%)</span>
+              </div>
+            </div>); })}</div>
+          </div>);
+        })}
+      </div>
+    </Card>)}
+
+    {/* E DETECTION — Round 2 */}
+    {eCandidates.length > 0 && (<Card>
+      <h3 className="font-display text-base mb-1 flex items-center gap-2">💎 E Detection — สินค้าที่อาจเป็น "นางฟ้า"</h3>
+      <p className="text-[10px] text-stone-500 mb-3">B/C/D ที่ Performance เหมือน A — พิจารณาย้ายเป็น A</p>
+      <div className="space-y-2">{eCandidates.map(e => { const conf = e.confidence; const confBg = conf === 'high' ? 'bg-emerald-500' : conf === 'medium' ? 'bg-amber-500' : 'bg-stone-400'; const confLabel = conf === 'high' ? '🟢 HIGH' : conf === 'medium' ? '🟡 MEDIUM' : '🟠 LOW'; return (<div key={e.product.id} className="p-3 bg-gradient-to-br from-violet-50 to-white border border-violet-200 rounded">
+        <div className="flex items-center gap-2 mb-1.5">
+          <CategoryBadge cat={e.product.category} />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold truncate">{truncate(e.product.name, 28)} <span className="text-stone-400 text-xs">[{e.product.category} → A?]</span></div>
+            <div className="text-[10px] text-stone-500">Score {e.eScore}/7 · {confLabel}</div>
+          </div>
+          <span className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded flex-shrink-0 ${confBg}`}>{e.eScore}/7</span>
+        </div>
+        <div className="flex flex-wrap gap-1 mb-2">{e.reasons.map((r, i) => (<span key={i} className="text-[10px] bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">✓ {r}</span>))}</div>
+        <div className="text-[10px] text-stone-600 mb-2 italic">💡 {e.advice}</div>
+        {conf !== 'low' && (<button onClick={() => { if (confirm(`ย้าย "${e.product.name}" จาก ${e.product.category} → A?\n\n*ใน A Stack จะถูกจัดตามอันดับ GMV — ถ้า GMV ต่ำสุดใน A อาจเข้า PASSIVE`)) onPromoteToA(e.product.id); }} className="w-full text-xs bg-stone-900 text-lime-300 font-semibold py-1.5 rounded">ย้ายเป็น A →</button>)}
       </div>); })}</div>
     </Card>)}
 
