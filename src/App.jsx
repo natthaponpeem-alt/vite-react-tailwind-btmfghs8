@@ -98,31 +98,32 @@ function getPortfolioBalance(products, clips, days = 30) { const byCat = { A: 0,
 function getBlendedCommission(products, clips, days = 30) { let weightedSum = 0, totalGMV = 0; const breakdown = []; products.forEach(p => { const sales = getProductSales(p, clips, days); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; breakdown.push({ product: p, gmv: sales.primary, commission: c, contribution: sales.primary * c }); } }); if (totalGMV === 0) return null; const blended = weightedSum / totalGMV; breakdown.sort((a, b) => b.contribution - a.contribution); return { blended: Math.round(blended * 10) / 10, target: BLENDED_COMMISSION_TARGET, totalGMV, breakdown }; }
 
 // Cut Decision Helper (Round 1) — find products meeting "ตัด" criteria
-// A Stack Priority (Round 2) — rank A products by GMV + assign frequency tier
-function getAStack(products, clips) {
-  const aProducts = products.filter(p => p.category === 'A');
-  const withData = aProducts.map(p => {
+// Category Stack Priority (Round 2 / Lock 2.0) — rank products in any category by GMV + frequency tier
+function getCategoryStack(products, clips, category) {
+  const catProducts = products.filter(p => p.category === category);
+  const withData = catProducts.map(p => {
     const sales30d = getProductSales(p, clips, 30).primary;
     const sales7d = getProductSales(p, clips, 7).primary;
     const daily7d = sales7d / 7;
     const daily30d = sales30d / 30;
     const momentum = daily30d > 0 ? daily7d / daily30d : 1;
-    // Count clips this month
     const monthKey = currentMonth();
     const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length;
-    const revPerClip = sales30d > 0 && clipsThisMonth > 0 ? sales30d / Math.max(clipsThisMonth, 1) : 0;
-    return { product: p, sales30d, sales7d, momentum, clipsThisMonth, revPerClip };
+    return { product: p, sales30d, sales7d, momentum, clipsThisMonth };
   }).sort((a, b) => b.sales30d - a.sales30d);
 
   return withData.map((s, i) => {
     let tier, frequency, targetMonth;
-    if (i < 2) { tier = 'HOT'; frequency = '3-4 คลิป/สัปดาห์'; targetMonth = 14; }
-    else if (i < 4) { tier = 'STEADY'; frequency = '1-2 คลิป/สัปดาห์'; targetMonth = 6; }
+    if (i < 2) { tier = 'HOT'; frequency = '3-4 คลิป/wk'; targetMonth = 14; }
+    else if (i < 4) { tier = 'STEADY'; frequency = '1-2 คลิป/wk'; targetMonth = 6; }
     else { tier = 'PASSIVE'; frequency = '2-3 คลิป/เดือน'; targetMonth = 2.5; }
     const atRisk = s.momentum > 0 && s.momentum < 0.8;
     return { ...s, rank: i + 1, tier, frequency, targetMonth, atRisk };
   });
 }
+
+// Legacy alias for Dashboard (unchanged)
+function getAStack(products, clips) { return getCategoryStack(products, clips, 'A'); }
 
 // E Detection (Round 2) — find Winning Product candidates in B/C/D
 function getECandidates(products, clips) {
@@ -426,7 +427,7 @@ export default function App() {
         {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} monthlyTarget={monthlyTarget} onSetMonthlyTarget={persistMonthlyTarget} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
         {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} />)}
         {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={(pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(p => p !== pid) : [...selectedProduct.pillars, pid]; updateProduct(selectedProduct.id, { pillars: next }); }} onSetCategory={(cat) => updateProduct(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={(painId) => removePain(selectedProduct.id, painId)} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={(angleId) => removeAngle(selectedProduct.id, angleId)} onEditScore={() => setEditScoreProductId(selectedProduct.id)} onEditInfo={() => setEditProductInfoId(selectedProduct.id)} onLock={() => setShowLockProduct(true)} onUnlock={() => unlockProduct(selectedProduct.id)} onDelete={() => deleteProduct(selectedProduct.id)} onAddClip={() => { setClipForVOnly(false); setShowAddClip(true); }} onEditClip={(id) => setEditClipId(id)} showToast={showToast} />)}
-        {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={unlockProduct} onLockNew={() => setPage('products')} />)}
+        {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={unlockProduct} onLockNew={() => setPage('products')} />)}
         {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPromoteToA={(id) => updateProduct(id, { category: 'A' })} />)}
       </main>
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-stone-200 z-30">
@@ -831,17 +832,176 @@ function ClipRow({ clip, onEdit }) {
   </button>);
 }
 
-function LockListPage({ lockedProducts, clips, onSelectProduct, onUnlock, onLockNew }) {
+function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlock, onLockNew }) {
+  const monthKey = currentMonth();
+  const monthLabel = new Date().toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
+  const dayOfMonth = new Date().getDate();
+  const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  const daysLeft = daysInMonth - dayOfMonth;
+  const expectedPct = Math.round((dayOfMonth / daysInMonth) * 100);
+
   const totalTarget = lockedProducts.reduce((s, p) => s + (p.locked?.targetClips || 0), 0);
-  const totalMade = lockedProducts.reduce((s, p) => s + clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonth()).length, 0);
+  const totalMade = lockedProducts.reduce((s, p) => s + clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length, 0);
+  const overallPct = totalTarget > 0 ? Math.round((totalMade / totalTarget) * 100) : 0;
+  const onTrack = overallPct >= expectedPct - 5;
+
+  // Build stacks for each category (use ALL products for ranking, then filter locked)
+  const stacks = useMemo(() => {
+    const result = {};
+    ['A', 'B', 'C', 'D'].forEach(cat => {
+      const fullStack = getCategoryStack(products, clips, cat);
+      const lockedIds = new Set(lockedProducts.filter(p => p.category === cat).map(p => p.id));
+      result[cat] = fullStack.filter(s => lockedIds.has(s.product.id));
+    });
+    return result;
+  }, [products, clips, lockedProducts]);
+
+  // Per-category stats (locked products only)
+  const catStats = useMemo(() => {
+    const result = {};
+    ['A', 'B', 'C', 'D'].forEach(cat => {
+      const catLocked = lockedProducts.filter(p => p.category === cat);
+      const target = catLocked.reduce((s, p) => s + (p.locked?.targetClips || 0), 0);
+      const made = catLocked.reduce((s, p) => s + clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length, 0);
+      result[cat] = { count: catLocked.length, target, made, pct: target > 0 ? Math.round((made / target) * 100) : 0 };
+    });
+    return result;
+  }, [lockedProducts, clips, monthKey]);
+
   return (<div className="space-y-4">
-    <div className="flex items-center justify-between"><div><h1 className="font-display text-3xl">Lock List</h1><p className="text-stone-500 text-sm">เดือน {new Date().toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}</p></div><button onClick={onLockNew} className="bg-stone-900 text-lime-300 font-semibold text-sm px-4 py-2 rounded-md">+ Lock</button></div>
-    <Card><div className="grid grid-cols-3 gap-3"><div><div className="text-[10px] uppercase tracking-wider text-stone-500">Locked</div><div className="font-display text-2xl">{lockedProducts.length}</div></div><div><div className="text-[10px] uppercase tracking-wider text-stone-500">เป้าคลิป</div><div className="font-display text-2xl">{totalTarget}</div></div><div><div className="text-[10px] uppercase tracking-wider text-stone-500">ทำได้</div><div className="font-display text-2xl">{totalMade}</div><div className="text-[10px] text-stone-400">{totalTarget > 0 ? Math.round((totalMade / totalTarget) * 100) : 0}%</div></div></div></Card>
-    {lockedProducts.length === 0 ? (<Card><div className="text-center py-8"><Lock className="w-12 h-12 text-stone-300 mx-auto mb-3" /><p className="text-stone-500 text-sm mb-4">ยังไม่มีสินค้า Lock เดือนนี้</p><p className="text-xs text-stone-400">ไปที่หน้าสินค้า แล้วกด Lock</p></div></Card>) : (<div className="space-y-3">{lockedProducts.map(p => { const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonth()).length; const target = p.locked?.targetClips || 1; const pct = Math.min(100, Math.round((made / target) * 100)); const anglesToTest = p.locked?.anglesToTest || []; const testAngles = (p.angles || []).filter(a => anglesToTest.includes(a.id)); return (<Card key={p.id}>
-      <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2 min-w-0"><CategoryBadge cat={p.category} /><button onClick={() => onSelectProduct(p.id)} className="font-display text-lg hover:underline text-left truncate">{p.name}</button></div><button onClick={() => onUnlock(p.id)} className="text-xs text-stone-500 hover:text-rose-600 flex-shrink-0">🔓 Unlock</button></div>
-      <div className="mb-3"><div className="flex items-baseline justify-between mb-1"><span className="text-xs text-stone-600">Progress</span><span className="font-mono text-sm font-bold">{made}/{target}</span></div><div className="w-full h-2 bg-stone-200 rounded-full overflow-hidden"><div className={`h-full transition-all ${pct >= 100 ? 'bg-emerald-500' : 'bg-lime-400'}`} style={{ width: `${pct}%` }}></div></div></div>
-      {testAngles.length > 0 && (<div className="space-y-1.5 pt-2 border-t border-stone-100"><div className="text-xs font-semibold text-stone-600 mb-1">Angles ที่ต้อง test:</div>{testAngles.map(a => { const angleClips = clips.filter(c => c.productId === p.id && c.angleId === a.id && c.postedAt?.slice(0, 7) === currentMonth()).length; return (<div key={a.id} className="flex items-center justify-between text-xs"><span className="text-stone-700 flex-1 mr-2 line-clamp-1">• {a.text}</span><span className="font-mono text-stone-500 flex-shrink-0">{angleClips} คลิป</span></div>); })}</div>)}
-    </Card>); })}</div>)}
+    {/* HEADER */}
+    <div>
+      <h1 className="font-display text-3xl">Lock List</h1>
+      <p className="text-stone-500 text-sm">{monthLabel} · เหลือ {daysLeft} วัน</p>
+    </div>
+
+    {/* TOP STATS CARD */}
+    <Card>
+      <div className="grid grid-cols-4 gap-2 mb-3">
+        <div className="text-center"><div className="font-display text-2xl leading-none">{totalTarget}</div><div className="text-[10px] uppercase tracking-wider text-stone-500 mt-0.5">เป้า</div></div>
+        <div className="text-center"><div className="font-display text-2xl leading-none">{totalMade}</div><div className="text-[10px] uppercase tracking-wider text-stone-500 mt-0.5">ทำได้</div></div>
+        <div className="text-center"><div className="font-display text-2xl leading-none">{lockedProducts.length}</div><div className="text-[10px] uppercase tracking-wider text-stone-500 mt-0.5">Lock</div></div>
+        <div className="text-center"><div className={`font-display text-2xl leading-none ${onTrack ? 'text-emerald-600' : 'text-amber-600'}`}>{overallPct}%</div><div className="text-[10px] uppercase tracking-wider text-stone-500 mt-0.5">Progress</div></div>
+      </div>
+      <div className="w-full h-2.5 bg-stone-100 rounded-full overflow-hidden relative">
+        <div className={`absolute h-full transition-all ${onTrack ? 'bg-emerald-500' : 'bg-amber-400'}`} style={{ width: `${overallPct}%` }}></div>
+        <div className="absolute top-0 h-full w-px bg-stone-700" style={{ left: `${expectedPct}%` }} title={`ควรอยู่ที่ ${expectedPct}%`}></div>
+      </div>
+      <div className="text-[10px] text-stone-500 mt-1">{onTrack ? '✓ on track' : `⚠️ ช้ากว่าเป้า (วันที่ ${dayOfMonth} ควรอยู่ ${expectedPct}%)`}</div>
+      <button onClick={onLockNew} className="w-full mt-3 bg-stone-900 text-lime-300 font-bold text-sm py-2.5 rounded-md">+ Lock สินค้าใหม่</button>
+    </Card>
+
+    {lockedProducts.length === 0 ? (<Card><div className="text-center py-8"><Lock className="w-12 h-12 text-stone-300 mx-auto mb-3" /><p className="text-stone-500 text-sm mb-1">ยังไม่มีสินค้า Lock เดือนนี้</p><p className="text-xs text-stone-400">ไปที่หน้าสินค้า แล้วกด Lock</p></div></Card>) : (
+      <>{['A', 'B', 'C', 'D'].map(cat => {
+        const info = ABCD_INFO[cat];
+        const stack = stacks[cat] || [];
+        const stats = catStats[cat];
+        const target = PORTFOLIO_TARGET[cat];
+
+        if (stack.length === 0) {
+          return (<div key={cat}>
+            <div className="flex items-center justify-between mb-1.5 px-1">
+              <div className="flex items-center gap-2"><div className={`w-5 h-5 rounded ${info.bg} text-white text-[10px] font-bold flex items-center justify-center`}>{cat}</div><span className="font-display text-base">{info.desc}</span></div>
+              <span className="text-[10px] text-stone-400">เป้า {target}%</span>
+            </div>
+            <Card><div className="text-center py-4 border-2 border-dashed border-stone-200 -m-4 rounded-lg"><div className="text-stone-400 text-3xl mb-1">{cat === 'D' ? '🎯' : cat === 'C' ? '💰' : cat === 'B' ? '🆕' : '🔥'}</div><p className="text-xs text-stone-500 mb-2">ยังไม่ Lock สินค้าหมวด {cat}</p><button onClick={onLockNew} className="text-[10px] bg-stone-900 text-lime-300 font-semibold px-3 py-1.5 rounded">+ Lock {cat}</button></div></Card>
+          </div>);
+        }
+
+        // Group stack by tier
+        const tiers = { HOT: stack.filter(s => s.tier === 'HOT'), STEADY: stack.filter(s => s.tier === 'STEADY'), PASSIVE: stack.filter(s => s.tier === 'PASSIVE') };
+
+        return (<div key={cat}>
+          {/* Section header */}
+          <div className="flex items-center justify-between mb-1.5 px-1">
+            <div className="flex items-center gap-2"><div className={`w-5 h-5 rounded ${info.bg} text-white text-[10px] font-bold flex items-center justify-center`}>{cat}</div><span className="font-display text-base">{info.desc}</span></div>
+            <div className="text-right"><span className="text-xs font-mono font-bold">{stats.made}/{stats.target}</span><span className="text-[10px] text-stone-400 ml-1">({stats.pct}%)</span></div>
+          </div>
+          <Card>
+            {/* A: rich cards. B/C/D: compact rows */}
+            {cat === 'A' ? (
+              <div className="space-y-3">{['HOT', 'STEADY', 'PASSIVE'].map(tierName => { const items = tiers[tierName]; if (items.length === 0) return null; const meta = TIER_META[tierName]; return (<div key={tierName}>
+                <div className="text-[10px] font-bold text-stone-600 uppercase tracking-wider mb-1.5">{meta.emoji} {meta.label}</div>
+                <div className="space-y-1.5">{items.map(s => <LockedProductCard key={s.product.id} stack={s} clips={clips} monthKey={monthKey} onSelect={onSelectProduct} onUnlock={onUnlock} rich />)}</div>
+              </div>); })}</div>
+            ) : (
+              <div className="space-y-2">{['HOT', 'STEADY', 'PASSIVE'].map(tierName => { const items = tiers[tierName]; if (items.length === 0) return null; const meta = TIER_META[tierName]; return (<div key={tierName}>
+                <div className="text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1 px-0.5">{meta.emoji} {meta.label} <span className="text-stone-400 normal-case">({items.length})</span></div>
+                <div className="space-y-1">{items.map(s => <LockedProductRow key={s.product.id} stack={s} clips={clips} monthKey={monthKey} onSelect={onSelectProduct} onUnlock={onUnlock} />)}</div>
+              </div>); })}</div>
+            )}
+          </Card>
+        </div>);
+      })}</>
+    )}
+  </div>);
+}
+
+// Tier metadata for display
+const TIER_META = {
+  HOT: { emoji: '🔥', label: 'HOT' },
+  STEADY: { emoji: '⚡', label: 'STEADY' },
+  PASSIVE: { emoji: '💤', label: 'PASSIVE' }
+};
+
+// Rich card for A products
+function LockedProductCard({ stack, clips, monthKey, onSelect, onUnlock, rich }) {
+  const s = stack;
+  const p = s.product;
+  const target = p.locked?.targetClips || s.targetMonth || 1;
+  const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length;
+  const pct = Math.min(100, Math.round((made / target) * 100));
+  const dayOfMonth = new Date().getDate();
+  const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  const expectedPct = Math.round((dayOfMonth / daysInMonth) * 100);
+  const wayBehind = pct < expectedPct - 25;
+  const barColor = wayBehind ? 'bg-rose-500' : pct >= 100 ? 'bg-emerald-500' : pct >= expectedPct - 5 ? 'bg-lime-400' : 'bg-amber-400';
+
+  return (<div className={`p-2.5 bg-gradient-to-r from-stone-50 to-white border ${s.atRisk ? 'border-rose-300 ring-1 ring-rose-200' : 'border-stone-200'} rounded-lg active:bg-stone-100`}>
+    <div className="flex items-start justify-between gap-2 mb-1.5">
+      <button onClick={() => onSelect(p.id)} className="flex items-center gap-2 min-w-0 text-left flex-1">
+        <span className="text-stone-400 font-display text-sm flex-shrink-0">#{s.rank}</span>
+        <span className="font-semibold text-sm truncate">{truncate(p.name, 22)}</span>
+        {p.tiktokRank && <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded font-bold flex-shrink-0">🏆#{p.tiktokRank}</span>}
+        {p.isShopAds && <span className="text-[9px] bg-red-600 text-white px-1 rounded flex-shrink-0">🛒</span>}
+        {s.atRisk && <span className="text-[9px] bg-rose-600 text-white px-1 rounded font-bold flex-shrink-0">⚠️</span>}
+      </button>
+      <button onClick={() => onUnlock(p.id)} className="text-[10px] text-stone-400 hover:text-rose-600 flex-shrink-0">🔓</button>
+    </div>
+    <div className="flex items-center gap-2 mb-1">
+      <div className="flex-1 h-1.5 bg-white rounded-full overflow-hidden border border-stone-200">
+        <div className={`h-full transition-all ${barColor}`} style={{ width: `${pct}%` }}></div>
+      </div>
+      <span className="text-[10px] font-mono text-stone-600 flex-shrink-0 tabular-nums">{made}/{target} ({pct}%)</span>
+    </div>
+    <div className="text-[10px] text-stone-500 flex flex-wrap gap-x-2">
+      <span className="font-mono">฿{fmtNum(s.sales30d)}/30d</span>
+      <span>· {s.frequency}</span>
+      {s.momentum > 0 && s.momentum !== 1 && <span className={`font-mono ${s.momentum > 1.1 ? 'text-emerald-600' : s.momentum < 0.8 ? 'text-rose-600' : 'text-stone-400'}`}>{s.momentum > 1 ? '↗' : '↘'} {Math.round((s.momentum - 1) * 100)}%</span>}
+    </div>
+  </div>);
+}
+
+// Compact row for B/C/D
+function LockedProductRow({ stack, clips, monthKey, onSelect, onUnlock }) {
+  const s = stack;
+  const p = s.product;
+  const target = p.locked?.targetClips || 1;
+  const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length;
+  const pct = Math.min(100, Math.round((made / target) * 100));
+  const barColor = pct >= 100 ? 'bg-emerald-500' : pct >= 50 ? 'bg-lime-400' : 'bg-amber-400';
+
+  return (<div className={`flex items-center gap-2 py-1.5 px-2 rounded ${s.atRisk ? 'bg-rose-50' : 'hover:bg-stone-50'} active:bg-stone-100`}>
+    <button onClick={() => onSelect(p.id)} className="flex-1 flex items-center gap-1.5 min-w-0 text-left">
+      <span className="font-medium text-xs truncate flex-1">{truncate(p.name, 24)}</span>
+      {p.isShopAds && <span className="text-[9px] flex-shrink-0">🛒</span>}
+      {s.atRisk && <span className="text-[9px] text-rose-600 flex-shrink-0">⚠️</span>}
+    </button>
+    <div className="w-14 h-1.5 bg-stone-200 rounded-full overflow-hidden flex-shrink-0">
+      <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }}></div>
+    </div>
+    <span className="text-[10px] font-mono text-stone-500 tabular-nums flex-shrink-0 w-12 text-right">{made}/{target}</span>
+    <button onClick={() => onUnlock(p.id)} className="text-[10px] text-stone-300 hover:text-rose-600 flex-shrink-0">🔓</button>
   </div>);
 }
 
@@ -1024,42 +1184,31 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
       </div>); })}</div>
     </Card>)}
 
-    {/* A STACK PRIORITY — Round 2 */}
+    {/* A STACK PRIORITY — Preview (full view in Lock List) */}
     {aStack.length > 0 && (<Card>
-      <h3 className="font-display text-base mb-1 flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 A Stack Priority</h3>
-      <p className="text-[10px] text-stone-500 mb-3">จัดความถี่ลงคลิปใน A — top มาแรงลงถี่ที่สุด, ตัวอื่นห้ามทอดทิ้ง</p>
-      <div className="space-y-3">
-        {[{ key: 'HOT', emoji: '🔥', label: 'HOT (ลงถี่สุด)', bg: 'from-rose-50 to-orange-50', border: 'border-rose-200' },
-          { key: 'STEADY', emoji: '⚡', label: 'STEADY', bg: 'from-sky-50 to-blue-50', border: 'border-sky-200' },
-          { key: 'PASSIVE', emoji: '💤', label: 'PASSIVE (รักษาการรับรู้)', bg: 'from-stone-50 to-slate-50', border: 'border-stone-200' }].map(group => {
-          const items = aStack.filter(s => s.tier === group.key);
-          if (items.length === 0) return null;
-          return (<div key={group.key}>
-            <div className="text-[10px] font-bold text-stone-600 uppercase tracking-wider mb-1.5">{group.emoji} {group.label}</div>
-            <div className="space-y-1.5">{items.map(s => { const progress = Math.min(100, Math.round((s.clipsThisMonth / s.targetMonth) * 100)); return (<div key={s.product.id} className={`p-2.5 bg-gradient-to-r ${group.bg} border ${group.border} rounded`}>
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-stone-500 font-display text-sm">#{s.rank}</span>
-                  <span className="font-semibold text-sm truncate">{truncate(s.product.name, 22)}</span>
-                  {s.atRisk && <span className="text-[9px] font-bold bg-rose-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">⚠️ AT RISK</span>}
-                  {s.product.isShopAds && <span className="text-[9px] bg-red-600 text-white px-1 rounded flex-shrink-0">🛒</span>}
-                </div>
-              </div>
-              <div className="text-[10px] text-stone-600 mb-1.5 flex flex-wrap gap-x-2">
-                <span className="font-mono">฿{fmtNum(s.sales30d)}/30d</span>
-                {s.momentum > 0 && s.momentum !== 1 && <span className={`font-mono ${s.momentum > 1.1 ? 'text-emerald-600' : s.momentum < 0.8 ? 'text-rose-600' : 'text-stone-500'}`}>{s.momentum > 1 ? '↗' : '↘'} {Math.round((s.momentum - 1) * 100)}%</span>}
-                <span>📅 {s.frequency}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-1.5 bg-white rounded-full overflow-hidden">
-                  <div className={`h-full ${progress >= 100 ? 'bg-emerald-500' : progress >= 50 ? 'bg-lime-400' : 'bg-amber-400'}`} style={{ width: `${progress}%` }}></div>
-                </div>
-                <span className="text-[10px] font-mono text-stone-600 flex-shrink-0">{s.clipsThisMonth}/{Math.round(s.targetMonth)} ({progress}%)</span>
-              </div>
-            </div>); })}</div>
-          </div>);
-        })}
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="font-display text-base flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 A Stack — Top {Math.min(3, aStack.length)}</h3>
+        <span className="text-[10px] text-stone-400">ดูครบที่ Lock List →</span>
       </div>
+      <p className="text-[10px] text-stone-500 mb-3">A ที่มาแรงสุด — ลงคลิปถี่สุด</p>
+      <div className="space-y-1.5">{aStack.slice(0, 3).map(s => { const monthKey = currentMonth(); const target = s.product.locked?.targetClips || s.targetMonth || 1; const made = clips.filter(c => c.productId === s.product.id && c.postedAt?.slice(0, 7) === monthKey).length; const pct = Math.min(100, Math.round((made / target) * 100)); return (<div key={s.product.id} className={`p-2 bg-gradient-to-r ${s.tier === 'HOT' ? 'from-rose-50 to-orange-50 border-rose-200' : s.tier === 'STEADY' ? 'from-sky-50 to-blue-50 border-sky-200' : 'from-stone-50 to-slate-50 border-stone-200'} border rounded`}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] font-bold text-stone-600">{s.tier === 'HOT' ? '🔥' : s.tier === 'STEADY' ? '⚡' : '💤'}</span>
+            <span className="text-stone-500 font-display text-sm">#{s.rank}</span>
+            <span className="font-semibold text-sm truncate">{truncate(s.product.name, 20)}</span>
+            {s.atRisk && <span className="text-[9px] bg-rose-600 text-white px-1 rounded font-bold flex-shrink-0">⚠️</span>}
+            {s.product.isShopAds && <span className="text-[9px] bg-red-600 text-white px-1 rounded flex-shrink-0">🛒</span>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-white rounded-full overflow-hidden">
+            <div className={`h-full ${pct >= 100 ? 'bg-emerald-500' : pct >= 50 ? 'bg-lime-400' : 'bg-amber-400'}`} style={{ width: `${pct}%` }}></div>
+          </div>
+          <span className="text-[10px] font-mono text-stone-600 flex-shrink-0 tabular-nums">{made}/{Math.round(target)} · ฿{fmtNum(s.sales30d)}</span>
+        </div>
+      </div>); })}</div>
+      {aStack.length > 3 && <div className="text-center mt-2 text-[10px] text-stone-400">+{aStack.length - 3} ตัวอื่น · ดูที่หน้า Lock List</div>}
     </Card>)}
 
     {/* E DETECTION — Round 2 */}
