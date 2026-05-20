@@ -80,6 +80,7 @@ const PAIN_SOURCES = [{ id: 'shopee', label: '💬 Shopee/Lazada (1-3 ดาว)
 const CLIP_LEVELS = [{ id: 'traffic', label: 'Traffic', color: 'bg-sky-500' }, { id: 'consideration', label: 'Consideration', color: 'bg-violet-500' }, { id: 'conversion', label: 'Conversion', color: 'bg-rose-500' }];
 
 const TARGET_ANGLES = 7; const RESCORE_DAYS = 7; const PICK_THRESHOLD = 83; const WAIT_THRESHOLD = 55; const ARGOON_PASS = 15; const ARGOON_WATCH = 10; const ARGOON_MAX = 18; const WINNER_GMV = 1000; const CONCENTRATION_LIMIT = 60; const REPOST_INTERVALS = [7, 14, 30]; const STATS_24H_WINDOW = [22, 30]; const STATS_7D_WINDOW = [156, 204]; const PORTFOLIO_TARGET = { A: 60, B: 25, C: 10, D: 5 }; const BLENDED_COMMISSION_TARGET = 15; const DEFAULT_MONTHLY_CLIP_TARGET = 150;
+const MONTHLY_REVENUE_TARGET = 300000; // ฿ — goal for commission revenue/month
 const uid = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => new Date().toISOString().slice(0, 7);
@@ -93,7 +94,7 @@ const hoursSince = (iso) => !iso ? 999 : (Date.now() - new Date(iso).getTime()) 
 function getStatsPending(clips) { const pending24h = [], pending7d = []; clips.forEach(c => { const hrs = hoursSince(c.postedAt); if (hrs >= STATS_24H_WINDOW[0] && hrs <= STATS_24H_WINDOW[1] && !c.views24h) pending24h.push(c); if (hrs >= STATS_7D_WINDOW[0] && hrs <= STATS_7D_WINDOW[1] && !c.views7d) pending7d.push(c); }); return { pending24h, pending7d }; }
 function calcScore(sc = {}) { let total = 0, max = 0; const cv = (v) => v === '' || v === null || v === undefined ? null : Number(v); const commission = cv(sc.commission); if (commission !== null && !isNaN(commission)) { total += commission >= 20 ? 3 : commission >= 15 ? 2 : commission >= 10 ? 1 : 0; max += 3; } const g7 = cv(sc.gmv7dPct), g30 = cv(sc.gmv30dPct); if (g7 !== null && g30 !== null && !isNaN(g7) && !isNaN(g30)) { if (g7 > 0 && g30 > 0) total += 3; else if (g7 < 0 && g30 < 0) total += 1; else total += 2; max += 3; } else if (g7 !== null && !isNaN(g7)) { total += g7 > 0 ? 2 : 1; max += 3; } const creators = cv(sc.creatorCount); if (creators !== null && !isNaN(creators)) { total += creators <= 500 ? 3 : creators <= 1000 ? 2 : 1; max += 3; } const angles = cv(sc.anglesCount); if (angles !== null && !isNaN(angles)) { total += angles >= 3 ? 3 : angles >= 2 ? 2 : 1; max += 3; } const cr = cv(sc.crPct); if (cr !== null && !isNaN(cr)) { total += cr >= 20 ? 3 : cr >= 10 ? 2 : 1; max += 3; } const conc = cv(sc.concentration); if (conc !== null && !isNaN(conc)) { total += conc < 30 ? 3 : conc <= 60 ? 2 : 1; max += 3; } return { total, max, pct: max > 0 ? Math.round((total / max) * 100) : 0 }; }
 function getDecision(pct) { return pct >= PICK_THRESHOLD ? 'PICK' : pct >= WAIT_THRESHOLD ? 'WAIT' : 'DROP'; }
-function autoClassify({ gmv30d, commission, tiktokRank }) { const g = Number(gmv30d) || 0; const c = Number(commission) || 0; const rank = Number(tiktokRank) || 0; if (g >= 30000) { if (c >= 15) return { cat: 'A', label: 'A — ideal', reason: 'Mass + คอมดี = A ideal', confidence: 'high' }; return { cat: 'A', label: 'A (proven exception)', reason: 'Mass = ฐานรายได้แม้คอมต่ำ', confidence: 'high' }; } if (g >= 10000) { if (c >= 20) return { cat: 'B', label: 'B → A potential', reason: 'กำลังพิสูจน์ตัว ใกล้ E', confidence: 'medium' }; return { cat: 'B', label: 'B', reason: 'Volume ปานกลาง — เทสต่อ', confidence: 'medium' }; } if (g >= 1000) { if (c >= 20) return { cat: 'D', label: 'D', reason: 'คอมสูงแต่ volume ไม่ถึง mass — กินกำไรเป็นรอบ ห้าม auto-promote เป็น A', confidence: 'medium' }; if (c >= 10) return { cat: 'C', label: 'C', reason: 'Volume น้อย คอมปานกลาง — ดู price/repeat-buy', confidence: 'low' }; return { cat: 'C', label: 'C / Cut', reason: 'Volume + คอมต่ำ — พิจารณาตัด', confidence: 'low' }; } if (rank >= 1 && rank <= 5) return { cat: 'B', label: 'B (Top 1-5 untested)', reason: 'Mass ใน TikTok แต่ยังไม่เทสในช่อง', confidence: 'medium' }; if (rank >= 6 && rank <= 20) return { cat: 'B', label: 'B (Top 10-20)', reason: 'Demand ปานกลาง — testing zone', confidence: 'medium' }; if (rank > 20) return { cat: 'B', label: 'B (weak signal)', reason: 'อันดับต่ำ — เทสด่วน หรือ skip', confidence: 'low' }; return { cat: 'B', label: 'B (ใหม่)', reason: 'ยังไม่มี data — เริ่มเทส', confidence: 'low' }; }
+function autoClassify({ gmv30d, commission, tiktokRank, price }) { const g = Number(gmv30d) || 0; const c = Number(commission) || 0; const rank = Number(tiktokRank) || 0; const pr = Number(price) || 0; if (g >= 30000) { if (c >= 15) return { cat: 'A', label: 'A — ideal', reason: 'Mass + คอมดี = A ideal', confidence: 'high' }; return { cat: 'A', label: 'A (proven exception)', reason: 'Mass = ฐานรายได้แม้คอมต่ำ', confidence: 'high' }; } if (g >= 10000) { if (pr > 0 && pr < 500 && c < 20) return { cat: 'C', label: 'C (low-price + mass)', reason: `ราคา ฿${pr} + GMV ฿${fmtNum(g)} = mass low-ticket → C traffic driver`, confidence: 'medium' }; if (c >= 20) return { cat: 'B', label: 'B → A potential', reason: 'กำลังพิสูจน์ตัว ใกล้ E', confidence: 'medium' }; return { cat: 'B', label: 'B', reason: 'Volume ปานกลาง — เทสต่อ', confidence: 'medium' }; } if (g >= 1000) { if (pr >= 800 && c >= 20) return { cat: 'D', label: 'D (premium)', reason: `ราคา ฿${pr} + คอม ${c}% — กินกำไรเป็นรอบ ห้าม auto-promote A`, confidence: 'medium' }; if (pr > 0 && pr < 500) return { cat: 'C', label: 'C (low-price, low-vol)', reason: `ราคา ฿${pr} — traffic driver / repeat buy`, confidence: 'low' }; if (c >= 20) return { cat: 'D', label: 'D', reason: 'คอมสูงแต่ volume ไม่ถึง mass — D ตามนิยาม', confidence: 'medium' }; if (c >= 10) return { cat: 'C', label: 'C', reason: 'Volume น้อย คอมปานกลาง — ดู price/repeat-buy', confidence: 'low' }; return { cat: 'C', label: 'C / Cut', reason: 'Volume + คอมต่ำ — พิจารณาตัด', confidence: 'low' }; } if (rank >= 1 && rank <= 5) return { cat: 'B', label: 'B (Top 1-5 untested)', reason: 'Mass ใน TikTok แต่ยังไม่เทสในช่อง', confidence: 'medium' }; if (rank >= 6 && rank <= 20) return { cat: 'B', label: 'B (Top 10-20)', reason: 'Demand ปานกลาง — testing zone', confidence: 'medium' }; if (rank > 20) return { cat: 'B', label: 'B (weak signal)', reason: 'อันดับต่ำ — เทสด่วน หรือ skip', confidence: 'low' }; return { cat: 'B', label: 'B (ใหม่)', reason: 'ยังไม่มี data — เริ่มเทส', confidence: 'low' }; }
 function getPortfolioBalance(products, clips, days = 30) { const byCat = { A: 0, B: 0, C: 0, D: 0 }; let total = 0; products.forEach(p => { if (!['A', 'B', 'C', 'D'].includes(p.category)) return; const sales = getProductSales(p, clips, days); byCat[p.category] += sales.primary; total += sales.primary; }); if (total === 0) return null; return Object.fromEntries(Object.entries(byCat).map(([k, v]) => { const actual = Math.round((v / total) * 100); const target = PORTFOLIO_TARGET[k]; const diff = actual - target; return [k, { actual, target, diff, gmv: v, status: Math.abs(diff) <= 5 ? 'ok' : diff > 0 ? 'over' : 'under' }]; })); }
 function getBlendedCommission(products, clips, days = 30) { let weightedSum = 0, totalGMV = 0; const breakdown = []; products.forEach(p => { const sales = getProductSales(p, clips, days); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; breakdown.push({ product: p, gmv: sales.primary, commission: c, contribution: sales.primary * c }); } }); if (totalGMV === 0) return null; const blended = weightedSum / totalGMV; breakdown.sort((a, b) => b.contribution - a.contribution); return { blended: Math.round(blended * 10) / 10, target: BLENDED_COMMISSION_TARGET, totalGMV, breakdown }; }
 
@@ -158,8 +159,26 @@ function getECandidates(products, clips) {
   }).filter(Boolean).sort((a, b) => b.eScore - a.eScore);
 }
 
-function getProductsToCut(products, clips) {
-  return products.map(p => {
+// ROI Calculator (v2.6) — calculate revenue commission per product + path to monthly target
+function getROIAnalysis(products, clips, monthlyTargetGMV) {
+  const items = products.map(p => {
+    const sales30d = getProductSales(p, clips, 30).primary;
+    const commission = Number(p.scorecard?.commission) || 0;
+    const price = Number(p.price) || 0;
+    const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0;
+    const orders30d = price > 0 ? Math.round(sales30d / price) : 0;
+    const currentCommRevenue = sales30d * commission / 100;
+    const ordersNeededAlone = (commPerOrder > 0 && monthlyTargetGMV > 0) ? Math.ceil(monthlyTargetGMV / commPerOrder) : null;
+    return { product: p, sales30d, commission, price, commPerOrder, orders30d, currentCommRevenue, ordersNeededAlone };
+  }).filter(i => i.sales30d > 0 || i.commPerOrder > 0).sort((a, b) => b.currentCommRevenue - a.currentCommRevenue);
+
+  const totalCommRevenue = items.reduce((s, i) => s + i.currentCommRevenue, 0);
+  const gap = Math.max(0, monthlyTargetGMV - totalCommRevenue);
+  const pct = monthlyTargetGMV > 0 ? Math.round((totalCommRevenue / monthlyTargetGMV) * 100) : 0;
+  return { items, totalCommRevenue, gap, pct };
+}
+
+function getProductsToCut(products, clips) {  return products.map(p => {
     const reasons = [];
     const commission = Number(p.scorecard?.commission) || 0;
     const sales = getProductSales(p, clips, 30);
@@ -702,7 +721,7 @@ function ProductCard({ product, clipCount, onClick }) {
   const commission = product.scorecard?.commission;
   return (<button onClick={onClick} className="text-left bg-white border border-stone-200 rounded-md p-4 hover:border-stone-400 transition relative">
     {product.locked && <div className="absolute top-3 right-3"><Lock className="w-4 h-4 text-stone-700" /></div>}
-    <div className="flex items-center gap-1 mb-2 flex-wrap"><CategoryBadge cat={product.category} />{productType && <span className="text-[10px] bg-stone-100 text-stone-600 px-1.5 py-0.5 rounded">{productType.emoji} {productType.label}</span>}{product.tiktokRank && <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold">🏆 #{product.tiktokRank}</span>}{product.isShopAds && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">🛒 ตะกร้าแดง</span>}{commission && <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-mono">คอม {commission}%</span>}{product.gmvMaxPct && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-mono">⚡{product.gmvMaxPct}%</span>}{isStale && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">ค้างคัดกรอง</span>}</div>
+    <div className="flex items-center gap-1 mb-2 flex-wrap"><CategoryBadge cat={product.category} />{productType && <span className="text-[10px] bg-stone-100 text-stone-600 px-1.5 py-0.5 rounded">{productType.emoji} {productType.label}</span>}{product.tiktokRank && <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold">🏆 #{product.tiktokRank}</span>}{product.isShopAds && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">🛒 ตะกร้าแดง</span>}{product.price > 0 && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-mono">฿{fmtNum(product.price)}</span>}{commission && <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-mono">คอม {commission}%</span>}{product.gmvMaxPct && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-mono">⚡{product.gmvMaxPct}%</span>}{isStale && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">ค้างคัดกรอง</span>}</div>
     <h3 className="font-display text-lg leading-tight mb-1 line-clamp-2">{product.name}</h3>
     {product.brand && <p className="text-xs text-stone-500 mb-1 line-clamp-1">{product.brand}</p>}
     <div className="text-[10px]"><RescoreText lastScoredAt={product.lastScoredAt} /></div>
@@ -718,7 +737,7 @@ function ProductListRow({ product, clipCount, onClick, isLast }) {
     <CategoryBadge cat={product.category} />
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-2"><h3 className="font-display text-sm truncate">{product.name}</h3>{product.locked && <Lock className="w-3 h-3 text-stone-500 flex-shrink-0" />}</div>
-      <div className="text-[10px] text-stone-500 flex items-center gap-1.5 flex-wrap">{productType && <span>{productType.emoji}</span>}{product.tiktokRank && <span className="font-bold text-rose-700">🏆 #{product.tiktokRank}</span>}{product.isShopAds && <span className="font-bold text-red-700">🛒</span>}{commission && <span className="font-mono">คอม {commission}%</span>}{product.gmvMaxPct && <span className="font-mono text-amber-700">⚡{product.gmvMaxPct}%</span>}<span>· {clipCount} คลิป</span><RescoreText lastScoredAt={product.lastScoredAt} /></div>
+      <div className="text-[10px] text-stone-500 flex items-center gap-1.5 flex-wrap">{productType && <span>{productType.emoji}</span>}{product.tiktokRank && <span className="font-bold text-rose-700">🏆 #{product.tiktokRank}</span>}{product.isShopAds && <span className="font-bold text-red-700">🛒</span>}{product.price > 0 && <span className="font-mono text-emerald-700">฿{fmtNum(product.price)}</span>}{commission && <span className="font-mono">คอม {commission}%</span>}{product.gmvMaxPct && <span className="font-mono text-amber-700">⚡{product.gmvMaxPct}%</span>}<span>· {clipCount} คลิป</span><RescoreText lastScoredAt={product.lastScoredAt} /></div>
     </div>
     <div className="text-right flex-shrink-0"><div className="font-mono text-xs font-bold">{product.scorePct}%</div>{decision && <div className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${decision.bg} text-white mt-0.5`}>{decision.label}</div>}</div>
     <ChevronRight className="w-4 h-4 text-stone-400 flex-shrink-0" />
@@ -738,7 +757,7 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
     <button onClick={onBack} className="flex items-center gap-1 text-sm text-stone-500 hover:text-stone-900"><ChevronLeft className="w-4 h-4" /> กลับ</button>
     <div className="bg-stone-900 text-stone-50 rounded-md p-5">
       <div className="flex items-start justify-between mb-3"><div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1 mb-2 flex-wrap">{productType && <span className="text-xs bg-stone-700 px-2 py-0.5 rounded">{productType.emoji} {productType.label}</span>}{product.tiktokRank && <span className="text-xs bg-rose-600 text-rose-50 px-2 py-0.5 rounded font-bold">🏆 Top #{product.tiktokRank}</span>}{product.isShopAds && <span className="text-xs bg-red-600 text-red-50 px-2 py-0.5 rounded font-bold">🛒 ตะกร้าแดง</span>}{commission && <span className="text-xs bg-violet-700 text-violet-100 px-2 py-0.5 rounded font-mono">คอม {commission}%</span>}{product.gmvMaxPct && <span className="text-xs bg-amber-600 text-amber-50 px-2 py-0.5 rounded font-mono">⚡ MAX {product.gmvMaxPct}%</span>}</div>
+        <div className="flex items-center gap-1 mb-2 flex-wrap">{productType && <span className="text-xs bg-stone-700 px-2 py-0.5 rounded">{productType.emoji} {productType.label}</span>}{product.tiktokRank && <span className="text-xs bg-rose-600 text-rose-50 px-2 py-0.5 rounded font-bold">🏆 Top #{product.tiktokRank}</span>}{product.isShopAds && <span className="text-xs bg-red-600 text-red-50 px-2 py-0.5 rounded font-bold">🛒 ตะกร้าแดง</span>}{product.price > 0 && <span className="text-xs bg-emerald-700 text-emerald-50 px-2 py-0.5 rounded font-mono">💰 ฿{fmtNum(product.price)}</span>}{commission && <span className="text-xs bg-violet-700 text-violet-100 px-2 py-0.5 rounded font-mono">คอม {commission}%</span>}{product.gmvMaxPct && <span className="text-xs bg-amber-600 text-amber-50 px-2 py-0.5 rounded font-mono">⚡ MAX {product.gmvMaxPct}%</span>}</div>
         <h1 className="font-display text-2xl mb-1 leading-tight">{product.name}</h1>{product.brand && <p className="text-stone-400 text-sm">{product.brand}</p>}
         <div className="flex gap-2 mt-2 flex-wrap">{product.tiktokLink && (<a href={product.tiktokLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-stone-800 hover:bg-stone-700 text-stone-100 px-2 py-1 rounded inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" /> TikTok</a>)}{product.kalodataLink && (<a href={product.kalodataLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-stone-800 hover:bg-stone-700 text-stone-100 px-2 py-1 rounded inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Kalodata</a>)}</div>
       </div><div className="flex flex-col gap-1 flex-shrink-0">{product.locked ? (<button onClick={onUnlock} className="bg-amber-400 text-stone-900 text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1"><Lock className="w-3 h-3" /> Locked</button>) : (<button onClick={onLock} className="bg-stone-700 text-stone-100 text-xs font-semibold px-3 py-1.5 rounded hover:bg-stone-600">🔒 Lock เดือนนี้</button>)}<button onClick={onEditInfo} className="bg-stone-800 text-stone-200 text-xs px-3 py-1.5 rounded hover:bg-stone-700 flex items-center gap-1"><Edit3 className="w-3 h-3" /> แก้ไข Info</button></div></div>
@@ -757,6 +776,10 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
             <div className="flex items-baseline justify-between"><span className="text-xs text-stone-600">7 วัน</span><span className="font-mono font-bold">฿{fmtNum(sales7d.fromManual)}</span></div>
             <div className="flex items-baseline justify-between"><span className="text-xs text-stone-600">30 วัน</span><span className="font-mono font-bold">฿{fmtNum(sales30d.fromManual)}</span></div>
           </div>
+          {product.price > 0 && sales30d.fromManual > 0 && (() => { const orders30d = Math.round(sales30d.fromManual / product.price); const ordersPerDay = (orders30d / 30).toFixed(1); const comm = Number(product.scorecard?.commission) || 0; const commPerOrder = comm > 0 ? Math.round(product.price * comm / 100) : 0; return (<div className="mt-2 pt-2 border-t border-emerald-200 text-[10px] space-y-0.5">
+            <div className="flex justify-between"><span className="text-stone-600">≈ Orders 30d</span><span className="font-mono font-bold text-emerald-700">{orders30d} <span className="text-stone-500 font-normal">({ordersPerDay}/วัน)</span></span></div>
+            {commPerOrder > 0 && <div className="flex justify-between"><span className="text-stone-600">คอม/order</span><span className="font-mono font-bold text-emerald-700">฿{fmtNum(commPerOrder)}</span></div>}
+          </div>); })()}
           {product.salesData?.updatedAt && <div className="text-[9px] text-stone-500 mt-2">อัพเดท {daysSince(product.salesData.updatedAt)}d ก่อน</div>}
         </>) : (<><div className="text-xs text-stone-500 mb-1">ยังไม่ได้กรอก</div><button onClick={onEditInfo} className="text-[10px] text-emerald-700 underline">+ กรอกยอดจาก TikTok</button></>)}
       </Card>
@@ -976,6 +999,8 @@ function LockedProductCard({ stack, clips, monthKey, onSelect, onUnlock, rich })
     </div>
     <div className="text-[10px] text-stone-500 flex flex-wrap gap-x-2">
       <span className="font-mono">฿{fmtNum(s.sales30d)}/30d</span>
+      {p.price > 0 && s.sales30d > 0 && <span className="font-mono text-emerald-700">≈ {Math.round(s.sales30d / p.price)} orders</span>}
+      {p.price > 0 && Number(p.scorecard?.commission) > 0 && <span className="font-mono text-violet-700">฿{Math.round(p.price * Number(p.scorecard.commission) / 100)}/order</span>}
       <span>· {s.frequency}</span>
       {s.momentum > 0 && s.momentum !== 1 && <span className={`font-mono ${s.momentum > 1.1 ? 'text-emerald-600' : s.momentum < 0.8 ? 'text-rose-600' : 'text-stone-400'}`}>{s.momentum > 1 ? '↗' : '↘'} {Math.round((s.momentum - 1) * 100)}%</span>}
     </div>
@@ -1164,6 +1189,8 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
   // A Stack + E Detection (Round 2)
   const aStack = useMemo(() => getAStack(products, clips), [products, clips]);
   const eCandidates = useMemo(() => getECandidates(products, clips), [products, clips]);
+  // ROI (v2.6)
+  const roi = useMemo(() => getROIAnalysis(products, clips, MONTHLY_REVENUE_TARGET), [products, clips]);
 
   return (<div className="space-y-4">
     <div className="flex gap-1 justify-end">{[{ id: '7', label: '7 วันล่าสุด' }, { id: '30', label: '30 วันล่าสุด' }, { id: '90', label: '90 วันล่าสุด' }].map(d => (<button key={d.id} onClick={() => setPeriod(d.id)} className={`text-xs px-3 py-1.5 rounded ${period === d.id ? 'bg-stone-900 text-lime-300 font-bold' : 'bg-white border border-stone-200'}`}>{d.label}</button>))}</div>
@@ -1228,6 +1255,44 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         <div className="text-[10px] text-stone-600 mb-2 italic">💡 {e.advice}</div>
         {conf !== 'low' && (<button onClick={() => { if (confirm(`ย้าย "${e.product.name}" จาก ${e.product.category} → A?\n\n*ใน A Stack จะถูกจัดตามอันดับ GMV — ถ้า GMV ต่ำสุดใน A อาจเข้า PASSIVE`)) onPromoteToA(e.product.id); }} className="w-full text-xs bg-stone-900 text-lime-300 font-semibold py-1.5 rounded">ย้ายเป็น A →</button>)}
       </div>); })}</div>
+    </Card>)}
+
+    {/* ROI CALCULATOR — v2.6 */}
+    {roi.items.length > 0 && (<Card className="bg-gradient-to-br from-amber-50 to-white border-amber-200">
+      <h3 className="font-display text-base mb-1 flex items-center gap-2">🎯 Path to ฿{fmtNum(MONTHLY_REVENUE_TARGET)}/เดือน</h3>
+      <p className="text-[10px] text-stone-500 mb-3">คอมมิชชั่นจากสินค้าที่ขายจริง (GMV × Commission%)</p>
+
+      {/* Top progress */}
+      <div className="mb-4 p-3 bg-white border border-amber-200 rounded-lg">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div><div className="text-[10px] uppercase tracking-wider text-stone-500">ตอนนี้</div><div className="font-display text-xl">฿{fmtNum(Math.round(roi.totalCommRevenue))}</div></div>
+          <div className="text-right"><div className="text-[10px] uppercase tracking-wider text-stone-500">เป้า</div><div className="font-display text-xl text-stone-400">฿{fmtNum(MONTHLY_REVENUE_TARGET)}</div></div>
+        </div>
+        <div className="w-full h-2 bg-stone-100 rounded-full overflow-hidden mb-1">
+          <div className={`h-full ${roi.pct >= 100 ? 'bg-emerald-500' : roi.pct >= 50 ? 'bg-lime-400' : 'bg-amber-400'}`} style={{ width: `${Math.min(100, roi.pct)}%` }}></div>
+        </div>
+        <div className="flex justify-between text-[10px] text-stone-600"><span>{roi.pct}% ถึงเป้า</span><span>ขาด ฿{fmtNum(Math.round(roi.gap))}</span></div>
+      </div>
+
+      {/* Per-product breakdown */}
+      <div className="text-[10px] uppercase tracking-wider font-bold text-stone-500 mb-2">📊 Contribution per product</div>
+      <div className="space-y-1.5">{roi.items.slice(0, 6).map(i => { const sharePct = roi.totalCommRevenue > 0 ? Math.round((i.currentCommRevenue / roi.totalCommRevenue) * 100) : 0; return (<div key={i.product.id} className="p-2 bg-white border border-stone-200 rounded">
+        <div className="flex items-center gap-2 mb-1">
+          <CategoryBadge cat={i.product.category} />
+          <span className="font-semibold text-sm truncate flex-1">{truncate(i.product.name, 22)}</span>
+          <span className="text-[10px] font-mono text-stone-500 flex-shrink-0">{sharePct}%</span>
+        </div>
+        <div className="text-[10px] text-stone-600 flex flex-wrap gap-x-2">
+          <span>GMV ฿{fmtNum(i.sales30d)}</span>
+          {i.price > 0 && <span>× ฿{fmtNum(i.price)}</span>}
+          <span className="font-mono">× {i.commission}%</span>
+          <span className="font-mono font-bold text-amber-700">= ฿{fmtNum(Math.round(i.currentCommRevenue))}</span>
+        </div>
+        {i.commPerOrder > 0 && i.ordersNeededAlone && (<div className="text-[9px] text-stone-500 mt-1">ถ้าโฟกัสตัวนี้คนเดียว ต้อง <strong className="font-mono">{fmtNum(i.ordersNeededAlone)}</strong> orders/เดือน ({Math.round(i.ordersNeededAlone / 30)}/วัน)</div>)}
+      </div>); })}</div>
+      {roi.items.length > 6 && <div className="text-center mt-2 text-[10px] text-stone-400">+{roi.items.length - 6} ตัวอื่น</div>}
+
+      <div className="mt-3 pt-3 border-t border-amber-200 text-[10px] text-stone-700">💡 <strong>วิธีปิด gap:</strong> เพิ่มสินค้าใหม่ที่มี commission/order สูง หรือดัน A ตัว HOT ให้ GMV เพิ่ม — ลองคำนวณดู กี่ orders/เดือนถึงปิด ฿{fmtNum(Math.round(roi.gap))}</div>
     </Card>)}
 
     <Card><h3 className="font-display text-base mb-3 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> 🏆 Winner Vault ({winners.length})</h3>
@@ -1315,6 +1380,7 @@ function AddProductModal({ onClose, onSave, showToast }) {
   const [tiktokLink, setTiktokLink] = useState(''); const [kalodataLink, setKalodataLink] = useState('');
   const [gmvMaxPct, setGmvMaxPct] = useState(''); const [pillars, setPillars] = useState([]);
   const [tiktokRank, setTiktokRank] = useState('');
+  const [price, setPrice] = useState('');
   const [sales7d, setSales7d] = useState(''); const [sales30d, setSales30d] = useState('');
   const [sc, setSc] = useState({ commission: '', gmv7dPct: '', gmv30dPct: '', creatorCount: '', anglesCount: '', crPct: '', concentration: '' });
   // Round 1: 2-Rules Gate + Shop Ads flag
@@ -1323,7 +1389,7 @@ function AddProductModal({ onClose, onSave, showToast }) {
   const [isShopAds, setIsShopAds] = useState(false);
   const score = calcScore(sc); const dec = DECISION_INFO[getDecision(score.pct)];
 
-  const suggestion = useMemo(() => autoClassify({ gmv30d: sales30d, commission: sc.commission, tiktokRank }), [sales30d, sc.commission, tiktokRank]);
+  const suggestion = useMemo(() => autoClassify({ gmv30d: sales30d, commission: sc.commission, tiktokRank, price }), [sales30d, sc.commission, tiktokRank, price]);
 
   const handleSave = async () => {
     if (!name) return showToast('กรุณาใส่ชื่อสินค้าก่อน', 'error');
@@ -1332,7 +1398,7 @@ function AddProductModal({ onClose, onSave, showToast }) {
       if (!proceed) return;
     }
     const salesData = (sales7d || sales30d) ? { last7d: Number(sales7d) || 0, last30d: Number(sales30d) || 0, updatedAt: new Date().toISOString() } : null;
-    await onSave({ name, brand, category, productType, tiktokLink, kalodataLink, gmvMaxPct, pillars, scorecard: sc, tiktokRank: tiktokRank ? Number(tiktokRank) : null, salesData, isShopAds, usedReal, scopeOK });
+    await onSave({ name, brand, category, productType, tiktokLink, kalodataLink, gmvMaxPct, pillars, scorecard: sc, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, salesData, isShopAds, usedReal, scopeOK });
   };
 
   const footer = (<div className="flex items-center justify-between gap-3"><div className="flex-1 min-w-0"><div className="text-[10px] uppercase tracking-wider text-stone-400">Score</div><div className="font-mono text-base">{score.total}/{score.max} ({score.pct}%) {dec && <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded ${dec.bg} text-white`}>{dec.label}</span>}</div></div><button onClick={handleSave} className="bg-stone-900 text-lime-300 font-bold px-5 py-2 rounded hover:bg-stone-800 flex-shrink-0">บันทึก</button></div>);
@@ -1360,6 +1426,10 @@ function AddProductModal({ onClose, onSave, showToast }) {
       <div className="grid grid-cols-2 gap-2">{Object.entries(ABCD_INFO).filter(([k]) => k !== 'V').map(([k, info]) => (<button key={k} onClick={() => setCategory(k)} className={`p-2.5 text-left rounded border transition ${category === k ? `${info.bg} text-white border-transparent` : 'bg-white border-stone-200 hover:border-stone-400'}`}><div className="font-bold text-sm">{info.label}</div><div className={`text-[10px] ${category === k ? 'text-white/80' : 'text-stone-500'}`}>{info.desc}</div></button>))}</div>
     </FormField>
     <FormField label="Pillars ที่ใช้ได้"><div className="grid grid-cols-2 gap-1.5">{DEFAULT_PILLARS.map(p => { const on = pillars.includes(p.id); return (<button key={p.id} onClick={() => setPillars(on ? pillars.filter(x => x !== p.id) : [...pillars, p.id])} className={`text-xs p-2 rounded border text-left ${on ? 'bg-stone-900 text-white border-stone-900' : 'bg-white border-stone-200'}`}>{p.emoji} {p.id} — <span className={on ? 'text-stone-300' : 'text-stone-600'}>{p.desc}</span></button>); })}</div></FormField>
+    <div className="grid grid-cols-2 gap-2">
+      <FormField label="💰 ราคาขาย ฿" hint="ใช้คำนวณ orders + classifier"><input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" placeholder="299" /></FormField>
+      <FormField label="🏆 TikTok Rank" hint="อันดับ Top — ใส่เลข"><input type="number" min="1" value={tiktokRank} onChange={e => setTiktokRank(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" placeholder="5" /></FormField>
+    </div>
     <div className="border-t border-stone-200 pt-4 mt-4 bg-emerald-50 -mx-5 px-5 py-3">
       <h3 className="font-display text-base mb-1">📈 ยอดขายจริง (จาก TikTok)</h3>
       <div className="grid grid-cols-2 gap-2">
@@ -1381,14 +1451,15 @@ function EditProductInfoModal({ product, onClose, onSave }) {
   const [tiktokLink, setTiktokLink] = useState(product?.tiktokLink || ''); const [kalodataLink, setKalodataLink] = useState(product?.kalodataLink || '');
   const [gmvMaxPct, setGmvMaxPct] = useState(product?.gmvMaxPct || '');
   const [tiktokRank, setTiktokRank] = useState(product?.tiktokRank || '');
+  const [price, setPrice] = useState(product?.price || '');
   const [isShopAds, setIsShopAds] = useState(!!product?.isShopAds);
   const [sales7d, setSales7d] = useState(product?.salesData?.last7d || '');
   const [sales30d, setSales30d] = useState(product?.salesData?.last30d || '');
   if (!product) return null;
-  const suggestion = useMemo(() => autoClassify({ gmv30d: sales30d, commission: product.scorecard?.commission, tiktokRank }), [sales30d, product.scorecard?.commission, tiktokRank]);
+  const suggestion = useMemo(() => autoClassify({ gmv30d: sales30d, commission: product.scorecard?.commission, tiktokRank, price }), [sales30d, product.scorecard?.commission, tiktokRank, price]);
   const handleSave = () => {
     const salesData = (sales7d || sales30d) ? { last7d: Number(sales7d) || 0, last30d: Number(sales30d) || 0, updatedAt: new Date().toISOString() } : product.salesData;
-    onSave({ name, brand, productType, tiktokLink, kalodataLink, gmvMaxPct, tiktokRank: tiktokRank ? Number(tiktokRank) : null, isShopAds, salesData });
+    onSave({ name, brand, productType, tiktokLink, kalodataLink, gmvMaxPct, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, isShopAds, salesData });
   };
   const footer = (<button onClick={handleSave} className="w-full bg-stone-900 text-lime-300 font-bold py-2.5 rounded">บันทึก</button>);
   return (<Modal title="แก้ไขข้อมูลสินค้า" onClose={onClose} footer={footer}>
@@ -1400,6 +1471,7 @@ function EditProductInfoModal({ product, onClose, onSave }) {
     <FormField label="Kalodata Link"><input value={kalodataLink} onChange={e => setKalodataLink(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" /></FormField>
     <FormField label="GMV MAX %"><input type="number" step="0.1" value={gmvMaxPct} onChange={e => setGmvMaxPct(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" /></FormField>
     <FormField label="🏆 TikTok Rank" hint="อันดับขายดีใน TikTok Shop เช่น 5 = Top 5"><input type="number" min="1" value={tiktokRank} onChange={e => setTiktokRank(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" placeholder="เช่น 5" /></FormField>
+    <FormField label="💰 ราคาขาย ฿" hint="ใช้คำนวณ orders + commission/order + ปรับ Auto-Classifier"><input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" placeholder="เช่น 299" /></FormField>
     <div className="border-t border-stone-200 pt-3 mt-3 bg-emerald-50 -mx-5 px-5 py-3"><h3 className="font-display text-base mb-1 flex items-center gap-1">📈 ยอดขายจริง (จาก TikTok)</h3>
       <div className="grid grid-cols-2 gap-2">
         <FormField label="ยอด 7 วัน ฿ (optional)"><input type="number" value={sales7d} onChange={e => setSales7d(e.target.value)} className="w-full px-2 py-1.5 border border-stone-200 rounded text-sm bg-white" placeholder="0" /></FormField>
