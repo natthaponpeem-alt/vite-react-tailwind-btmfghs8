@@ -405,7 +405,7 @@ export default function App() {
 
   if (!dbInitialized) {
     return (
-      <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center space-y-4">
+      <div className="min-h-screen bg-[#F5F1E8] flex flex-col items-center justify-center space-y-4">
         <Cloud className="w-12 h-12 text-lime-500 animate-pulse" />
         <div className="font-display text-stone-600">กำลังเชื่อมต่อฐานข้อมูล Cloud...</div>
       </div>
@@ -413,18 +413,20 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-50 text-stone-900 pb-24" style={{ fontFamily: "'Noto Sans Thai', system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-[#F5F1E8] text-stone-900 pb-24" style={{ fontFamily: "'Inter', 'Noto Sans Thai', system-ui, sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
-        .font-display { font-family: 'Noto Sans Thai', system-ui; font-weight: 900; letter-spacing: -0.02em; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+Thai:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
+        .font-display { font-family: 'Inter', 'Noto Sans Thai', system-ui; font-weight: 800; letter-spacing: -0.02em; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .scrollbar-thin::-webkit-scrollbar { height: 4px; width: 4px; }
         .scrollbar-thin::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 4px; }
         .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
         .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .btn-primary { background: linear-gradient(180deg, #D9E830 0%, #C4D429 100%); color: #1F3F2F; }
+        .btn-primary:hover { background: linear-gradient(180deg, #C4D429 0%, #B1C124 100%); }
       `}</style>
-      <header className="sticky top-0 z-20 bg-stone-900 text-stone-50 border-b-4 border-lime-400">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-20 bg-emerald-950 text-stone-50 border-b-2 border-lime-400/70 shadow-sm">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-lime-400 text-stone-900 rounded-md flex items-center justify-center font-display text-lg">P6</div>
             <div>
@@ -432,24 +434,24 @@ export default function App() {
                 PEEM6PACK 
                 {isSyncing ? <CloudOff className="w-3.5 h-3.5 text-amber-400 animate-pulse" title="กำลังซิงค์" /> : <Cloud className="w-3.5 h-3.5 text-emerald-400" title="ซิงค์ข้อมูลกับ Cloud แล้ว" />}
               </div>
-              <div className="text-xs text-stone-400 leading-tight">Command Center v2.5 (Cloud Sync)</div>
+              <div className="text-xs text-stone-400 leading-tight">Command Center v2.7</div>
             </div>
           </div>
           <div className="flex gap-1">
-            <button onClick={() => setShowBackup(true)} className="text-xs font-semibold bg-stone-800 hover:bg-stone-700 px-2.5 py-1.5 rounded transition flex items-center gap-1" title="Backup ข้อมูล"><Download className="w-3.5 h-3.5" /> Backup</button>
-            <label className="p-2 hover:bg-stone-800 rounded transition cursor-pointer" title="Import"><Upload className="w-4 h-4" /><input type="file" accept="application/json" onChange={importData} className="hidden" /></label>
-            <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-stone-800 rounded transition" title="Settings"><Settings className="w-4 h-4" /></button>
+            <button onClick={() => setShowBackup(true)} className="text-xs font-semibold bg-emerald-900 hover:bg-emerald-800 px-2.5 py-1.5 rounded transition flex items-center gap-1" title="Backup ข้อมูล"><Download className="w-3.5 h-3.5" /> Backup</button>
+            <label className="p-2 hover:bg-emerald-900 rounded transition cursor-pointer" title="Import"><Upload className="w-4 h-4" /><input type="file" accept="application/json" onChange={importData} className="hidden" /></label>
+            <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-emerald-900 rounded transition" title="Settings"><Settings className="w-4 h-4" /></button>
           </div>
         </div>
       </header>
-      <main className="max-w-6xl mx-auto px-4 py-5">
+      <main className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 py-5 md:py-6">
         {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} monthlyTarget={monthlyTarget} onSetMonthlyTarget={persistMonthlyTarget} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
         {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} />)}
         {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={(pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(p => p !== pid) : [...selectedProduct.pillars, pid]; updateProduct(selectedProduct.id, { pillars: next }); }} onSetCategory={(cat) => updateProduct(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={(painId) => removePain(selectedProduct.id, painId)} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={(angleId) => removeAngle(selectedProduct.id, angleId)} onEditScore={() => setEditScoreProductId(selectedProduct.id)} onEditInfo={() => setEditProductInfoId(selectedProduct.id)} onLock={() => setShowLockProduct(true)} onUnlock={() => unlockProduct(selectedProduct.id)} onDelete={() => deleteProduct(selectedProduct.id)} onAddClip={() => { setClipForVOnly(false); setShowAddClip(true); }} onEditClip={(id) => setEditClipId(id)} showToast={showToast} />)}
         {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={unlockProduct} onLockNew={() => setPage('products')} />)}
         {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPromoteToA={(id) => updateProduct(id, { category: 'A' })} />)}
       </main>
-      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-stone-200 z-30">
+      <nav className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t border-stone-200/70 z-30 shadow-[0_-2px_10px_rgba(0,0,0,0.04)]">
         <div className="max-w-6xl mx-auto grid grid-cols-5 gap-1 px-2 py-2">
           {[{ id: 'home', icon: Home, label: 'Home' }, { id: 'products', icon: Package, label: 'Products' }, { id: 'lock', icon: Lock, label: 'Lock' }, { id: 'log', icon: Database, label: 'Log' }, { id: 'addclip', icon: Plus, label: 'Clip', isAction: true }].map(item => {
             const Icon = item.icon; const active = page === item.id;
@@ -475,11 +477,11 @@ export default function App() {
   );
 }
 
-function StatCard({ icon: Icon, label, value, sub }) { return (<div className="bg-white border border-stone-200 rounded-md p-3"><Icon className="w-4 h-4 text-stone-400 mb-2" /><div className="font-display text-xl leading-none">{value}</div><div className="text-[10px] text-stone-500 mt-1 font-semibold uppercase tracking-wide">{label}</div><div className="text-[10px] text-stone-400 mt-0.5">{sub}</div></div>); }
+function StatCard({ icon: Icon, label, value, sub }) { return (<div className="bg-white border border-stone-200/70 rounded-xl p-3 md:p-4 shadow-sm"><Icon className="w-4 h-4 text-stone-400 mb-2" /><div className="font-display text-xl md:text-2xl leading-none">{value}</div><div className="text-[10px] text-stone-500 mt-1 font-semibold uppercase tracking-wide">{label}</div><div className="text-[10px] text-stone-400 mt-0.5">{sub}</div></div>); }
 function VBar({ label, value, target, sub, suffix }) { const pct = Math.min(100, Math.round((value / target) * 100)); const isGood = value >= target; return (<div><div className="flex items-baseline justify-between mb-1"><span className="text-xs font-semibold uppercase tracking-wide text-stone-600">{label}</span>{isGood ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <Clock className="w-3 h-3 text-stone-400" />}</div><div className="font-display text-2xl leading-none mb-1">{sub}</div><div className="w-full h-1.5 bg-stone-200 rounded-full overflow-hidden"><div className={`h-full ${isGood ? 'bg-emerald-500' : 'bg-amber-400'} transition-all`} style={{ width: `${pct}%` }}></div></div><div className="text-[10px] text-stone-400 mt-1">เป้า: {target}{suffix || ''}</div></div>); }
 function RescoreText({ lastScoredAt }) { const days = daysUntilRescore(lastScoredAt); if (days <= 0) return <span className="text-amber-700">🟡 ค้างคัดกรอง {Math.abs(days)} วัน</span>; if (days <= 2) return <span className="text-orange-600">⏱ คัดใหม่ในอีก {days} วัน</span>; return <span className="text-stone-500">⏱ คัดใหม่ในอีก {days} วัน</span>; }
 function CategoryBadge({ cat }) { const info = ABCD_INFO[cat]; if (!info) return <span className="inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold bg-stone-200 text-stone-500 flex-shrink-0">?</span>; return <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold text-white flex-shrink-0 ${info.bg}`}>{info.short}</span>; }
-function Card({ children, className = '' }) { return <div className={`bg-white border border-stone-200 rounded-md p-4 ${className}`}>{children}</div>; }
+function Card({ children, className = '' }) { return <div className={`bg-white border border-stone-200/70 rounded-xl p-4 shadow-sm ${className}`}>{children}</div>; }
 
 function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, monthlyTarget, onSetMonthlyTarget, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone }) {
   const today = todayStr();
@@ -534,7 +536,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   return (
     <div className="space-y-5">
       <div className="flex items-baseline justify-between">
-        <div><h1 className="font-display text-3xl">สวัสดี, ภีม</h1><p className="text-stone-500 text-sm mt-1">{new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
+        <div><h1 className="font-display text-2xl md:text-3xl lg:text-4xl">สวัสดี, ภีม</h1><p className="text-stone-500 text-sm mt-1">{new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
         <div className="text-right"><div className="font-mono font-bold text-2xl">{clipsToday.length}</div><div className="text-xs text-stone-500">คลิปวันนี้</div></div>
       </div>
 
@@ -634,7 +636,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
                 <span className="text-[10px] font-bold bg-violet-600 text-white px-1.5 py-0.5 rounded flex-shrink-0">{r.repostBucket}d</span>
               </div>
               <div className="flex gap-1">
-                <button onClick={() => onMakeSimilar(r.clip)} className="flex-1 text-xs bg-stone-900 text-lime-300 font-semibold px-2 py-1.5 rounded">ทำซ้ำ →</button>
+                <button onClick={() => onMakeSimilar(r.clip)} className="flex-1 text-xs bg-lime-400 text-stone-900 font-semibold px-2 py-1.5 rounded">ทำซ้ำ →</button>
                 <button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-2 py-1.5 rounded flex items-center justify-center gap-1"><CheckCircle2 className="w-3 h-3" /> ทำแล้ว</button>
               </div>
             </div>
@@ -697,17 +699,17 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
   }, [products, filter, typeFilter, search, sortBy]);
 
   return (<div className="space-y-4">
-    <div className="flex items-center justify-between"><h1 className="font-display text-3xl">สินค้า ({products.length})</h1><button onClick={onAdd} className="bg-stone-900 text-lime-300 font-semibold text-sm px-4 py-2 rounded-md hover:bg-stone-800 flex items-center gap-1"><Plus className="w-4 h-4" /> เพิ่ม</button></div>
+    <div className="flex items-center justify-between"><h1 className="font-display text-2xl md:text-3xl lg:text-4xl">สินค้า ({products.length})</h1><button onClick={onAdd} className="bg-lime-400 text-stone-900 font-semibold text-sm px-4 py-2 rounded-md hover:bg-lime-300 shadow-sm flex items-center gap-1"><Plus className="w-4 h-4" /> เพิ่ม</button></div>
     <div className="space-y-2">
       <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาสินค้า..." className="w-full pl-10 pr-3 py-2 bg-white border border-stone-200 rounded-md text-sm" /></div>
-      <div className="flex gap-1 overflow-x-auto scrollbar-thin pb-1">{[{ id: 'all', label: 'ทั้งหมด' }, { id: 'pick', label: '🟢 PICK' }, { id: 'wait', label: '🟡 WAIT' }, { id: 'drop', label: '🔴 DROP' }, { id: 'locked', label: '🔒 Lock' }, { id: 'A', label: 'A — ขายดี' }, { id: 'B', label: 'B — มาใหม่' }, { id: 'C', label: 'C — ประหยัด' }, { id: 'D', label: 'D — คอมสูง' }].map(f => (<button key={f.id} onClick={() => setFilter(f.id)} className={`whitespace-nowrap text-xs px-3 py-1.5 rounded-full transition ${filter === f.id ? 'bg-stone-900 text-lime-300 font-semibold' : 'bg-white border border-stone-200 text-stone-600 hover:border-stone-400'}`}>{f.label}</button>))}</div>
+      <div className="flex gap-1 overflow-x-auto scrollbar-thin pb-1">{[{ id: 'all', label: 'ทั้งหมด' }, { id: 'pick', label: '🟢 PICK' }, { id: 'wait', label: '🟡 WAIT' }, { id: 'drop', label: '🔴 DROP' }, { id: 'locked', label: '🔒 Lock' }, { id: 'A', label: 'A — ขายดี' }, { id: 'B', label: 'B — มาใหม่' }, { id: 'C', label: 'C — ประหยัด' }, { id: 'D', label: 'D — คอมสูง' }].map(f => (<button key={f.id} onClick={() => setFilter(f.id)} className={`whitespace-nowrap text-xs px-3 py-1.5 rounded-full transition ${filter === f.id ? 'bg-lime-400 text-stone-900 font-semibold' : 'bg-white border border-stone-200 text-stone-600 hover:border-stone-400'}`}>{f.label}</button>))}</div>
       <div className="flex gap-1 overflow-x-auto scrollbar-thin pb-1">
         <button onClick={() => setTypeFilter('all')} className={`whitespace-nowrap text-xs px-3 py-1 rounded-full transition ${typeFilter === 'all' ? 'bg-violet-600 text-white font-semibold' : 'bg-white border border-stone-200 text-stone-600'}`}>📦 ทุกหมวด</button>
         {PRODUCT_TYPES.map(t => (<button key={t.id} onClick={() => setTypeFilter(t.id)} className={`whitespace-nowrap text-xs px-3 py-1 rounded-full transition ${typeFilter === t.id ? 'bg-violet-600 text-white font-semibold' : 'bg-white border border-stone-200 text-stone-600'}`}>{t.emoji} {t.label}</button>))}
       </div>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs"><ArrowUpDown className="w-3 h-3 text-stone-400" /><select value={sortBy} onChange={e => setSortBy(e.target.value)} className="text-xs bg-white border border-stone-200 rounded px-2 py-1"><option value="score">คะแนน (สูง→ต่ำ)</option><option value="rescore">วันคัดล่าสุด (เก่า→ใหม่)</option><option value="name">ชื่อ A-Z</option><option value="created">เพิ่มล่าสุด</option></select><span className="text-stone-400 ml-1">{filtered.length} ตัว</span></div>
-        <div className="flex bg-white border border-stone-200 rounded-md p-0.5"><button onClick={() => setViewMode('box')} className={`p-1.5 rounded transition ${viewMode === 'box' ? 'bg-stone-900 text-lime-300' : 'text-stone-500'}`}><LayoutGrid className="w-3.5 h-3.5" /></button><button onClick={() => setViewMode('list')} className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-stone-900 text-lime-300' : 'text-stone-500'}`}><List className="w-3.5 h-3.5" /></button></div>
+        <div className="flex bg-white border border-stone-200 rounded-md p-0.5"><button onClick={() => setViewMode('box')} className={`p-1.5 rounded transition ${viewMode === 'box' ? 'bg-lime-400 text-stone-900' : 'text-stone-500'}`}><LayoutGrid className="w-3.5 h-3.5" /></button><button onClick={() => setViewMode('list')} className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-lime-400 text-stone-900' : 'text-stone-500'}`}><List className="w-3.5 h-3.5" /></button></div>
       </div>
     </div>
     {filtered.length === 0 ? (<Card><div className="text-center py-8"><Package className="w-12 h-12 text-stone-300 mx-auto mb-3" /><p className="text-stone-500 text-sm">{products.length === 0 ? 'ยังไม่มีสินค้า' : 'ไม่พบสินค้าที่ตรงกับตัวกรอง'}</p></div></Card>) : viewMode === 'box' ? (<div className="grid sm:grid-cols-2 gap-3">{filtered.map(p => (<ProductCard key={p.id} product={p} clipCount={clips.filter(c => c.productId === p.id).length} onClick={() => onSelect(p.id)} />))}</div>) : (<div className="bg-white border border-stone-200 rounded-md overflow-hidden">{filtered.map((p, i) => (<ProductListRow key={p.id} product={p} clipCount={clips.filter(c => c.productId === p.id).length} onClick={() => onSelect(p.id)} isLast={i === filtered.length - 1} />))}</div>)}
@@ -759,7 +761,7 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
       <div className="flex items-start justify-between mb-3"><div className="flex-1 min-w-0">
         <div className="flex items-center gap-1 mb-2 flex-wrap">{productType && <span className="text-xs bg-stone-700 px-2 py-0.5 rounded">{productType.emoji} {productType.label}</span>}{product.tiktokRank && <span className="text-xs bg-rose-600 text-rose-50 px-2 py-0.5 rounded font-bold">🏆 Top #{product.tiktokRank}</span>}{product.isShopAds && <span className="text-xs bg-red-600 text-red-50 px-2 py-0.5 rounded font-bold">🛒 ตะกร้าแดง</span>}{product.price > 0 && <span className="text-xs bg-emerald-700 text-emerald-50 px-2 py-0.5 rounded font-mono">💰 ฿{fmtNum(product.price)}</span>}{commission && <span className="text-xs bg-violet-700 text-violet-100 px-2 py-0.5 rounded font-mono">คอม {commission}%</span>}{product.gmvMaxPct && <span className="text-xs bg-amber-600 text-amber-50 px-2 py-0.5 rounded font-mono">⚡ MAX {product.gmvMaxPct}%</span>}</div>
         <h1 className="font-display text-2xl mb-1 leading-tight">{product.name}</h1>{product.brand && <p className="text-stone-400 text-sm">{product.brand}</p>}
-        <div className="flex gap-2 mt-2 flex-wrap">{product.tiktokLink && (<a href={product.tiktokLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-stone-800 hover:bg-stone-700 text-stone-100 px-2 py-1 rounded inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" /> TikTok</a>)}{product.kalodataLink && (<a href={product.kalodataLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-stone-800 hover:bg-stone-700 text-stone-100 px-2 py-1 rounded inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Kalodata</a>)}</div>
+        <div className="flex gap-2 mt-2 flex-wrap">{product.tiktokLink && (<a href={product.tiktokLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-emerald-900 hover:bg-emerald-800 text-stone-100 px-2 py-1 rounded inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" /> TikTok</a>)}{product.kalodataLink && (<a href={product.kalodataLink} target="_blank" rel="noopener noreferrer" className="text-xs bg-emerald-900 hover:bg-emerald-800 text-stone-100 px-2 py-1 rounded inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Kalodata</a>)}</div>
       </div><div className="flex flex-col gap-1 flex-shrink-0">{product.locked ? (<button onClick={onUnlock} className="bg-amber-400 text-stone-900 text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1"><Lock className="w-3 h-3" /> Locked</button>) : (<button onClick={onLock} className="bg-stone-700 text-stone-100 text-xs font-semibold px-3 py-1.5 rounded hover:bg-stone-600">🔒 Lock เดือนนี้</button>)}<button onClick={onEditInfo} className="bg-stone-800 text-stone-200 text-xs px-3 py-1.5 rounded hover:bg-stone-700 flex items-center gap-1"><Edit3 className="w-3 h-3" /> แก้ไข Info</button></div></div>
       <div className="flex items-center gap-2 flex-wrap mb-3"><span className="text-xs text-stone-400 uppercase tracking-wider mr-1">หมวด ABCD:</span>{Object.entries(ABCD_INFO).filter(([k]) => k !== 'V').map(([k, info]) => (<button key={k} onClick={() => onSetCategory(k)} className={`text-xs font-bold px-2 py-1 rounded transition ${product.category === k ? `${info.bg} text-white` : 'bg-stone-800 text-stone-400 hover:bg-stone-700'}`}>{info.short}</button>))}</div>
       <div className="flex items-center gap-4 pt-3 border-t border-stone-800">
@@ -795,17 +797,17 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
     <Card><h3 className="font-display text-base mb-2">📌 Pillars ที่ใช้ได้</h3>
       <div className="grid grid-cols-2 gap-2">{DEFAULT_PILLARS.map(p => { const on = product.pillars?.includes(p.id); return (<button key={p.id} onClick={() => onTogglePillar(p.id)} className={`text-left p-2.5 rounded-md border transition ${on ? 'bg-stone-900 text-white border-stone-900' : 'bg-white border-stone-200 hover:border-stone-400'}`}><div className="flex items-center gap-1 mb-0.5"><span>{p.emoji}</span><span className="font-bold text-xs">{p.id}</span></div><div className={`text-xs ${on ? 'text-stone-300' : 'text-stone-600'}`}>{p.desc}</div></button>); })}</div>
     </Card>
-    <Card><div className="flex items-center justify-between mb-2"><h3 className="font-display text-base">😣 Pain Bank ({product.pains?.length || 0})</h3><button onClick={onAddPain} className="text-xs bg-stone-900 text-lime-300 font-semibold px-3 py-1 rounded">+ เพิ่ม Pain</button></div>
+    <Card><div className="flex items-center justify-between mb-2"><h3 className="font-display text-base">😣 Pain Bank ({product.pains?.length || 0})</h3><button onClick={onAddPain} className="text-xs bg-lime-400 text-stone-900 font-semibold px-3 py-1 rounded">+ เพิ่ม Pain</button></div>
       {(!product.pains || product.pains.length === 0) ? (<p className="text-stone-400 text-sm text-center py-3">ยังไม่มี Pain — เพิ่ม Pain ก่อนเพื่อใช้ใน Splitter</p>) : (<div className="space-y-1.5">{product.pains.map(p => { const src = PAIN_SOURCES.find(s => s.id === p.source); return (<div key={p.id} className="flex items-start justify-between gap-2 p-2 bg-stone-50 rounded"><div className="flex-1 min-w-0"><div className="text-sm">{p.text}</div>{src && <div className="text-[10px] text-stone-500 mt-0.5">{src.label}</div>}</div><button onClick={() => onRemovePain(p.id)} className="p-1 text-stone-300 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button></div>); })}</div>)}
     </Card>
-    <Card><div className="flex items-center justify-between mb-2"><h3 className="font-display text-base">🎯 Angle Bank ({angleProgress}/{TARGET_ANGLES})</h3><button onClick={onAddAngle} className="text-xs bg-stone-900 text-lime-300 font-semibold px-3 py-1 rounded">+ เพิ่ม Angle</button></div>
+    <Card><div className="flex items-center justify-between mb-2"><h3 className="font-display text-base">🎯 Angle Bank ({angleProgress}/{TARGET_ANGLES})</h3><button onClick={onAddAngle} className="text-xs bg-lime-400 text-stone-900 font-semibold px-3 py-1 rounded">+ เพิ่ม Angle</button></div>
       <div className="w-full h-2 bg-stone-200 rounded-full overflow-hidden mb-3"><div className={`h-full ${anglePct >= 100 ? 'bg-emerald-500' : anglePct >= 70 ? 'bg-lime-400' : 'bg-amber-400'} transition-all`} style={{ width: `${anglePct}%` }}></div></div>
       {anglePct < 100 && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">เป้าหมาย 5-7 มุม/สินค้า — ขาดอีก {TARGET_ANGLES - angleProgress} มุม</div>}
       {bestAngle && bestAngle.count > 0 && (<div className="bg-gradient-to-r from-amber-50 to-lime-50 border border-amber-300 rounded p-2.5 mb-3"><div className="flex items-center gap-1 text-xs font-bold text-amber-900 mb-1"><Trophy className="w-3.5 h-3.5" /> 🏆 Best Angle</div><div className="text-sm font-semibold">{bestAngle.angle.text}</div><div className="text-xs text-stone-600 mt-1 font-mono">฿{fmtNum(Math.round(bestAngle.avg))}/คลิป · {bestAngle.count} คลิป · ฿{fmtNum(bestAngle.totalGMV)} รวม</div></div>)}
       {(!product.angles || product.angles.length === 0) ? (<p className="text-stone-400 text-sm text-center py-3">ยังไม่มี Angle</p>) : (<div className="space-y-1.5">{product.angles.map(a => { const isBest = bestAngle && bestAngle.angle.id === a.id; return (<div key={a.id} className={`flex items-start justify-between gap-2 p-2 rounded ${isBest ? 'bg-amber-50 border border-amber-200' : 'bg-stone-50'}`}><div className="text-sm flex-1 min-w-0">{isBest && '🏆 '}{a.text}</div><button onClick={() => onRemoveAngle(a.id)} className="p-1 text-stone-300 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button></div>); })}</div>)}
     </Card>
     <SplitterSection product={product} />
-    <Card><div className="flex items-center justify-between mb-3"><h3 className="font-display text-base">🎬 Clips ของสินค้านี้ ({clips.length})</h3><button onClick={onAddClip} className="text-xs bg-stone-900 text-lime-300 font-semibold px-3 py-1 rounded">+ บันทึกคลิป</button></div>
+    <Card><div className="flex items-center justify-between mb-3"><h3 className="font-display text-base">🎬 Clips ของสินค้านี้ ({clips.length})</h3><button onClick={onAddClip} className="text-xs bg-lime-400 text-stone-900 font-semibold px-3 py-1 rounded">+ บันทึกคลิป</button></div>
       {clips.length === 0 ? (<p className="text-stone-400 text-sm text-center py-4">ยังไม่มีคลิป</p>) : (<div className="space-y-2">{[...clips].reverse().map(c => (<ClipRow key={c.id} clip={c} onEdit={() => onEditClip(c.id)} />))}</div>)}
     </Card>
     <button onClick={onDelete} className="w-full text-xs text-rose-600 hover:bg-rose-50 py-2 rounded">🗑️ ลบสินค้านี้</button>
@@ -894,7 +896,7 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
   return (<div className="space-y-4">
     {/* HEADER */}
     <div>
-      <h1 className="font-display text-3xl">Lock List</h1>
+      <h1 className="font-display text-2xl md:text-3xl lg:text-4xl">Lock List</h1>
       <p className="text-stone-500 text-sm">{monthLabel} · เหลือ {daysLeft} วัน</p>
     </div>
 
@@ -911,7 +913,7 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
         <div className="absolute top-0 h-full w-px bg-stone-700" style={{ left: `${expectedPct}%` }} title={`ควรอยู่ที่ ${expectedPct}%`}></div>
       </div>
       <div className="text-[10px] text-stone-500 mt-1">{onTrack ? '✓ on track' : `⚠️ ช้ากว่าเป้า (วันที่ ${dayOfMonth} ควรอยู่ ${expectedPct}%)`}</div>
-      <button onClick={onLockNew} className="w-full mt-3 bg-stone-900 text-lime-300 font-bold text-sm py-2.5 rounded-md">+ Lock สินค้าใหม่</button>
+      <button onClick={onLockNew} className="w-full mt-3 bg-lime-400 text-stone-900 font-bold text-sm py-2.5 rounded-md">+ Lock สินค้าใหม่</button>
     </Card>
 
     {lockedProducts.length === 0 ? (<Card><div className="text-center py-8"><Lock className="w-12 h-12 text-stone-300 mx-auto mb-3" /><p className="text-stone-500 text-sm mb-1">ยังไม่มีสินค้า Lock เดือนนี้</p><p className="text-xs text-stone-400">ไปที่หน้าสินค้า แล้วกด Lock</p></div></Card>) : (
@@ -927,7 +929,7 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
               <div className="flex items-center gap-2"><div className={`w-5 h-5 rounded ${info.bg} text-white text-[10px] font-bold flex items-center justify-center`}>{cat}</div><span className="font-display text-base">{info.desc}</span></div>
               <span className="text-[10px] text-stone-400">เป้า {target}%</span>
             </div>
-            <Card><div className="text-center py-4 border-2 border-dashed border-stone-200 -m-4 rounded-lg"><div className="text-stone-400 text-3xl mb-1">{cat === 'D' ? '🎯' : cat === 'C' ? '💰' : cat === 'B' ? '🆕' : '🔥'}</div><p className="text-xs text-stone-500 mb-2">ยังไม่ Lock สินค้าหมวด {cat}</p><button onClick={onLockNew} className="text-[10px] bg-stone-900 text-lime-300 font-semibold px-3 py-1.5 rounded">+ Lock {cat}</button></div></Card>
+            <Card><div className="text-center py-4 border-2 border-dashed border-stone-200 -m-4 rounded-lg"><div className="text-stone-400 text-3xl mb-1">{cat === 'D' ? '🎯' : cat === 'C' ? '💰' : cat === 'B' ? '🆕' : '🔥'}</div><p className="text-xs text-stone-500 mb-2">ยังไม่ Lock สินค้าหมวด {cat}</p><button onClick={onLockNew} className="text-[10px] bg-lime-400 text-stone-900 font-semibold px-3 py-1.5 rounded">+ Lock {cat}</button></div></Card>
           </div>);
         }
 
@@ -1033,10 +1035,10 @@ function LockedProductRow({ stack, clips, monthKey, onSelect, onUnlock }) {
 function ClipLogPage({ products, clips, onEditClip, onMakeSimilar, onMarkRepostDone, onPromoteToA }) {
   const [view, setView] = useState('log');
   return (<div className="space-y-4">
-    <div className="flex items-center justify-between"><h1 className="font-display text-3xl">{view === 'log' ? 'Clip Log' : 'Dashboard'}</h1>
+    <div className="flex items-center justify-between"><h1 className="font-display text-2xl md:text-3xl lg:text-4xl">{view === 'log' ? 'Clip Log' : 'Dashboard'}</h1>
       <div className="flex bg-white border border-stone-200 rounded-md p-0.5">
-        <button onClick={() => setView('log')} className={`text-xs px-3 py-1.5 rounded transition ${view === 'log' ? 'bg-stone-900 text-lime-300 font-semibold' : 'text-stone-500'}`}>📋 Log</button>
-        <button onClick={() => setView('dashboard')} className={`text-xs px-3 py-1.5 rounded transition ${view === 'dashboard' ? 'bg-stone-900 text-lime-300 font-semibold' : 'text-stone-500'}`}>📊 Dashboard</button>
+        <button onClick={() => setView('log')} className={`text-xs px-3 py-1.5 rounded transition ${view === 'log' ? 'bg-lime-400 text-stone-900 font-semibold' : 'text-stone-500'}`}>📋 Log</button>
+        <button onClick={() => setView('dashboard')} className={`text-xs px-3 py-1.5 rounded transition ${view === 'dashboard' ? 'bg-lime-400 text-stone-900 font-semibold' : 'text-stone-500'}`}>📊 Dashboard</button>
       </div>
     </div>
     {view === 'log' ? <LogView products={products} clips={clips} onEditClip={onEditClip} /> : <DashboardView products={products} clips={clips} onMakeSimilar={onMakeSimilar} onEditClip={onEditClip} onMarkRepostDone={onMarkRepostDone} onPromoteToA={onPromoteToA} />}
@@ -1074,7 +1076,7 @@ function LogView({ products, clips, onEditClip }) {
   const winners = filtered.filter(c => (Number(c.gmv) || 0) >= WINNER_GMV).length;
 
   return (<div className="space-y-4">
-    <div className="flex gap-1 justify-end">{['7', '30', '90', 'all'].map(d => (<button key={d} onClick={() => setPeriod(d)} className={`text-xs px-3 py-1.5 rounded ${period === d ? 'bg-stone-900 text-lime-300 font-bold' : 'bg-white border border-stone-200'}`}>{d === 'all' ? 'ทั้งหมด' : `${d}d`}</button>))}</div>
+    <div className="flex gap-1 justify-end">{['7', '30', '90', 'all'].map(d => (<button key={d} onClick={() => setPeriod(d)} className={`text-xs px-3 py-1.5 rounded ${period === d ? 'bg-lime-400 text-stone-900 font-bold' : 'bg-white border border-stone-200'}`}>{d === 'all' ? 'ทั้งหมด' : `${d}d`}</button>))}</div>
     <div className="grid grid-cols-4 gap-2"><StatCard icon={Activity} label="คลิป" value={filtered.length} sub="" /><StatCard icon={DollarSign} label="GMV ฿" value={fmtNum(totalGMV)} sub="" /><StatCard icon={Package} label="Orders" value={fmtNum(totalOrders)} sub="" /><StatCard icon={Trophy} label="Winners" value={winners} sub="≥฿1k" /></div>
     <Card><div className="grid grid-cols-2 gap-2">
       <div><label className="text-[10px] uppercase tracking-wider text-stone-500 block mb-1">สินค้า</label><select value={filterProduct} onChange={e => setFilterProduct(e.target.value)} className="w-full text-sm px-2 py-1.5 bg-white border border-stone-200 rounded"><option value="">ทั้งหมด</option><option value="V">V — Value Content</option>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
@@ -1193,7 +1195,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
   const roi = useMemo(() => getROIAnalysis(products, clips, MONTHLY_REVENUE_TARGET), [products, clips]);
 
   return (<div className="space-y-4">
-    <div className="flex gap-1 justify-end">{[{ id: '7', label: '7 วันล่าสุด' }, { id: '30', label: '30 วันล่าสุด' }, { id: '90', label: '90 วันล่าสุด' }].map(d => (<button key={d.id} onClick={() => setPeriod(d.id)} className={`text-xs px-3 py-1.5 rounded ${period === d.id ? 'bg-stone-900 text-lime-300 font-bold' : 'bg-white border border-stone-200'}`}>{d.label}</button>))}</div>
+    <div className="flex gap-1 justify-end">{[{ id: '7', label: '7 วันล่าสุด' }, { id: '30', label: '30 วันล่าสุด' }, { id: '90', label: '90 วันล่าสุด' }].map(d => (<button key={d.id} onClick={() => setPeriod(d.id)} className={`text-xs px-3 py-1.5 rounded ${period === d.id ? 'bg-lime-400 text-stone-900 font-bold' : 'bg-white border border-stone-200'}`}>{d.label}</button>))}</div>
 
     {portfolioBalance && (<Card><h3 className="font-display text-base mb-1 flex items-center gap-2">⚖️ Portfolio Balance</h3>
       <p className="text-[10px] text-stone-500 mb-3">เป้าหมาย: A {PORTFOLIO_TARGET.A}% / B {PORTFOLIO_TARGET.B}% / C {PORTFOLIO_TARGET.C}% / D {PORTFOLIO_TARGET.D}% (วัดจาก GMV {period}d)</p>
@@ -1253,7 +1255,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
         <div className="flex flex-wrap gap-1 mb-2">{e.reasons.map((r, i) => (<span key={i} className="text-[10px] bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">✓ {r}</span>))}</div>
         <div className="text-[10px] text-stone-600 mb-2 italic">💡 {e.advice}</div>
-        {conf !== 'low' && (<button onClick={() => { if (confirm(`ย้าย "${e.product.name}" จาก ${e.product.category} → A?\n\n*ใน A Stack จะถูกจัดตามอันดับ GMV — ถ้า GMV ต่ำสุดใน A อาจเข้า PASSIVE`)) onPromoteToA(e.product.id); }} className="w-full text-xs bg-stone-900 text-lime-300 font-semibold py-1.5 rounded">ย้ายเป็น A →</button>)}
+        {conf !== 'low' && (<button onClick={() => { if (confirm(`ย้าย "${e.product.name}" จาก ${e.product.category} → A?\n\n*ใน A Stack จะถูกจัดตามอันดับ GMV — ถ้า GMV ต่ำสุดใน A อาจเข้า PASSIVE`)) onPromoteToA(e.product.id); }} className="w-full text-xs bg-lime-400 text-stone-900 font-semibold py-1.5 rounded">ย้ายเป็น A →</button>)}
       </div>); })}</div>
     </Card>)}
 
@@ -1301,7 +1303,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           <Trophy className="w-4 h-4 text-amber-500 flex-shrink-0" />
           <div className="flex-1 min-w-0"><div className="text-sm font-semibold line-clamp-1">{truncate(w.clip.hook, 40) || '(ไม่มี hook)'}</div><div className="text-[10px] text-stone-600">{w.clip.isV ? '📚 V' : (truncate(w.product?.name, 22) || '-')} · ฿{fmtNum(w.clip.gmv)} · {w.daysOld}d</div></div>
           <button onClick={() => onEditClip(w.clip.id)} className="text-xs text-stone-600 hover:text-stone-900 px-2 py-1 flex-shrink-0"><Edit3 className="w-3 h-3" /></button>
-          <button onClick={() => onMakeSimilar(w.clip)} className="text-xs bg-stone-900 text-lime-300 font-semibold px-2 py-1 rounded flex-shrink-0">ทำซ้ำ</button>
+          <button onClick={() => onMakeSimilar(w.clip)} className="text-xs bg-lime-400 text-stone-900 font-semibold px-2 py-1 rounded flex-shrink-0">ทำซ้ำ</button>
         </div>
         <div className="flex items-center gap-1 pl-6">
           <span className="text-[10px] text-stone-500 mr-1">Repost:</span>
@@ -1401,7 +1403,7 @@ function AddProductModal({ onClose, onSave, showToast }) {
     await onSave({ name, brand, category, productType, tiktokLink, kalodataLink, gmvMaxPct, pillars, scorecard: sc, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, salesData, isShopAds, usedReal, scopeOK });
   };
 
-  const footer = (<div className="flex items-center justify-between gap-3"><div className="flex-1 min-w-0"><div className="text-[10px] uppercase tracking-wider text-stone-400">Score</div><div className="font-mono text-base">{score.total}/{score.max} ({score.pct}%) {dec && <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded ${dec.bg} text-white`}>{dec.label}</span>}</div></div><button onClick={handleSave} className="bg-stone-900 text-lime-300 font-bold px-5 py-2 rounded hover:bg-stone-800 flex-shrink-0">บันทึก</button></div>);
+  const footer = (<div className="flex items-center justify-between gap-3"><div className="flex-1 min-w-0"><div className="text-[10px] uppercase tracking-wider text-stone-400">Score</div><div className="font-mono text-base">{score.total}/{score.max} ({score.pct}%) {dec && <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded ${dec.bg} text-white`}>{dec.label}</span>}</div></div><button onClick={handleSave} className="bg-lime-400 text-stone-900 font-bold px-5 py-2 rounded-md hover:bg-lime-300 shadow-sm flex-shrink-0">บันทึก</button></div>);
 
   return (<Modal title="เพิ่มสินค้าใหม่" onClose={onClose} size="lg" footer={footer}>
     {/* 2-Rules Gate */}
@@ -1461,7 +1463,7 @@ function EditProductInfoModal({ product, onClose, onSave }) {
     const salesData = (sales7d || sales30d) ? { last7d: Number(sales7d) || 0, last30d: Number(sales30d) || 0, updatedAt: new Date().toISOString() } : product.salesData;
     onSave({ name, brand, productType, tiktokLink, kalodataLink, gmvMaxPct, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, isShopAds, salesData });
   };
-  const footer = (<button onClick={handleSave} className="w-full bg-stone-900 text-lime-300 font-bold py-2.5 rounded">บันทึก</button>);
+  const footer = (<button onClick={handleSave} className="w-full bg-lime-400 text-stone-900 font-bold py-2.5 rounded">บันทึก</button>);
   return (<Modal title="แก้ไขข้อมูลสินค้า" onClose={onClose} footer={footer}>
     <FormField label="ชื่อสินค้า"><input value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" /></FormField>
     <FormField label="แบรนด์"><input value={brand} onChange={e => setBrand(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" /></FormField>
@@ -1493,7 +1495,7 @@ function EditScoreModal({ product, onClose, onSave }) {
   const [sc, setSc] = useState(product?.scorecard || {});
   if (!product) return null;
   const score = calcScore(sc); const dec = DECISION_INFO[getDecision(score.pct)];
-  const footer = (<div className="flex items-center justify-between gap-3"><div className="flex-1 min-w-0"><div className="text-[10px] uppercase tracking-wider text-stone-400">Score</div><div className="font-mono text-base">{score.total}/{score.max} ({score.pct}%) {dec && <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded ${dec.bg} text-white`}>{dec.label}</span>}</div></div><button onClick={() => onSave(sc)} className="bg-stone-900 text-lime-300 font-bold px-5 py-2 rounded flex-shrink-0">บันทึก</button></div>);
+  const footer = (<div className="flex items-center justify-between gap-3"><div className="flex-1 min-w-0"><div className="text-[10px] uppercase tracking-wider text-stone-400">Score</div><div className="font-mono text-base">{score.total}/{score.max} ({score.pct}%) {dec && <span className={`ml-1 text-[10px] font-bold px-2 py-0.5 rounded ${dec.bg} text-white`}>{dec.label}</span>}</div></div><button onClick={() => onSave(sc)} className="bg-lime-400 text-stone-900 font-bold px-5 py-2 rounded flex-shrink-0">บันทึก</button></div>);
   return (<Modal title={`คัดกรองใหม่: ${truncate(product.name, 20)}`} onClose={onClose} footer={footer}>
     <p className="text-xs text-stone-500 mb-3">คัดล่าสุด {daysSince(product.lastScoredAt)} วันที่แล้ว</p>
     <div className="grid grid-cols-2 gap-2"><FormField label="Commission %"><input type="number" value={sc.commission || ''} onChange={e => setSc({ ...sc, commission: e.target.value })} className="w-full px-2 py-1.5 border border-stone-200 rounded text-sm" /></FormField><FormField label="Creator Count"><input type="number" value={sc.creatorCount || ''} onChange={e => setSc({ ...sc, creatorCount: e.target.value })} className="w-full px-2 py-1.5 border border-stone-200 rounded text-sm" /></FormField></div>
@@ -1504,7 +1506,7 @@ function EditScoreModal({ product, onClose, onSave }) {
 
 function AddPainModal({ onClose, onSave }) {
   const [text, setText] = useState(''); const [source, setSource] = useState('personal');
-  const footer = (<button onClick={() => { if (text.trim()) onSave(text.trim(), source); }} className="w-full bg-stone-900 text-lime-300 font-bold py-2.5 rounded">บันทึก</button>);
+  const footer = (<button onClick={() => { if (text.trim()) onSave(text.trim(), source); }} className="w-full bg-lime-400 text-stone-900 font-bold py-2.5 rounded">บันทึก</button>);
   return (<Modal title="+ เพิ่ม Pain" onClose={onClose} footer={footer}>
     <FormField label="Pain Point *"><textarea value={text} onChange={e => setText(e.target.value)} autoFocus rows={3} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" /></FormField>
     <FormField label="ที่มาของ Pain"><div className="grid grid-cols-1 gap-1">{PAIN_SOURCES.map(s => (<button key={s.id} onClick={() => setSource(s.id)} className={`text-left text-xs p-2 rounded border ${source === s.id ? 'bg-stone-900 text-white border-stone-900' : 'bg-white border-stone-200'}`}>{s.label}</button>))}</div></FormField>
@@ -1513,7 +1515,7 @@ function AddPainModal({ onClose, onSave }) {
 
 function AddAngleModal({ onClose, onSave }) {
   const [text, setText] = useState('');
-  const footer = (<button onClick={() => { if (text.trim()) onSave(text.trim()); }} className="w-full bg-stone-900 text-lime-300 font-bold py-2.5 rounded">บันทึก</button>);
+  const footer = (<button onClick={() => { if (text.trim()) onSave(text.trim()); }} className="w-full bg-lime-400 text-stone-900 font-bold py-2.5 rounded">บันทึก</button>);
   return (<Modal title="+ เพิ่ม Angle" onClose={onClose} footer={footer}>
     <FormField label="Angle / มุมเล่า *"><textarea value={text} onChange={e => setText(e.target.value)} autoFocus rows={3} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" /></FormField>
   </Modal>);
@@ -1521,7 +1523,7 @@ function AddAngleModal({ onClose, onSave }) {
 
 function LockProductModal({ product, onClose, onSave }) {
   const [target, setTarget] = useState(10); const [anglesToTest, setAnglesToTest] = useState([]);
-  const footer = (<button onClick={() => onSave(target, anglesToTest)} className="w-full bg-stone-900 text-lime-300 font-bold py-2.5 rounded">🔒 Lock</button>);
+  const footer = (<button onClick={() => onSave(target, anglesToTest)} className="w-full bg-lime-400 text-stone-900 font-bold py-2.5 rounded">🔒 Lock</button>);
   return (<Modal title={`🔒 Lock: ${truncate(product.name, 25)}`} onClose={onClose} footer={footer}>
     <p className="text-xs text-stone-500 mb-3">Lock ไว้ใน Focus เดือนนี้</p>
     <FormField label="จำนวนคลิปเป้าหมาย *"><input type="number" value={target} onChange={e => setTarget(Number(e.target.value))} min={1} className="w-full px-3 py-2 border border-stone-200 rounded text-sm" /></FormField>
@@ -1540,7 +1542,7 @@ function AddClipModal({ products, defaultProductId, onClose, onSave, showToast }
     if (!isV && !productId) return showToast('กรุณาเลือกสินค้าก่อน', 'error'); 
     onSave({ isV, productId: isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted }); 
   };
-  const footer = (<button onClick={handleSave} className="w-full bg-stone-900 text-lime-300 font-bold py-2.5 rounded">บันทึก</button>);
+  const footer = (<button onClick={handleSave} className="w-full bg-lime-400 text-stone-900 font-bold py-2.5 rounded">บันทึก</button>);
   return (<Modal title="+ บันทึกคลิป" onClose={onClose} footer={footer}>
     <FormField label="ประเภทคลิป"><div className="grid grid-cols-2 gap-2"><button onClick={() => setIsV(false)} className={`p-2 rounded border text-sm ${!isV ? 'bg-stone-900 text-white border-stone-900' : 'bg-white border-stone-200'}`}>📦 คลิปสินค้า</button><button onClick={() => setIsV(true)} className={`p-2 rounded border text-sm ${isV ? 'bg-stone-900 text-white border-stone-900' : 'bg-white border-stone-200'}`}>📚 V — Value</button></div></FormField>
     {!isV && (<FormField label="สินค้า *"><select value={productId} onChange={e => setProductId(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm"><option value="">-- เลือก --</option>{products.map(p => <option key={p.id} value={p.id}>{ABCD_INFO[p.category]?.short || '?'} — {p.name}</option>)}</select></FormField>)}
@@ -1568,7 +1570,7 @@ function EditClipModal({ clip, products, onClose, onSave, onDelete }) {
   const [ctr, setCtr] = useState(clip.ctr || ''); const [note, setNote] = useState(clip.note || '');
   const selectedProduct = products.find(p => p.id === productId);
   const handleSave = () => onSave({ productId: clip.isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted, views24h: Number(views24h) || null, views7d: Number(views7d) || null, orders: Number(orders) || null, gmv: Number(gmv) || null, ctr: Number(ctr) || null, note });
-  const footer = (<div className="flex gap-2"><button onClick={onDelete} className="px-3 text-xs text-rose-600 hover:bg-rose-50 rounded py-2.5">🗑️ ลบ</button><button onClick={handleSave} className="flex-1 bg-stone-900 text-lime-300 font-bold py-2.5 rounded">บันทึก</button></div>);
+  const footer = (<div className="flex gap-2"><button onClick={onDelete} className="px-3 text-xs text-rose-600 hover:bg-rose-50 rounded py-2.5">🗑️ ลบ</button><button onClick={handleSave} className="flex-1 bg-lime-400 text-stone-900 font-bold py-2.5 rounded">บันทึก</button></div>);
   return (<Modal title="✏️ แก้ไขคลิป" onClose={onClose} size="lg" footer={footer}>
     {!clip.isV && (<FormField label="สินค้า"><select value={productId} onChange={e => setProductId(e.target.value)} className="w-full px-3 py-2 border border-stone-200 rounded text-sm"><option value="">-- เลือก --</option>{products.map(p => <option key={p.id} value={p.id}>{ABCD_INFO[p.category]?.short || '?'} — {p.name}</option>)}</select></FormField>)}
     <div className="grid grid-cols-2 gap-2"><FormField label="Pillar"><select value={pillarId} onChange={e => setPillarId(e.target.value)} className="w-full px-2 py-1.5 border border-stone-200 rounded text-sm"><option value="">-</option>{DEFAULT_PILLARS.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}</select></FormField><FormField label="วันที่ลง"><input type="date" value={postedAt} onChange={e => setPostedAt(e.target.value)} className="w-full px-2 py-1.5 border border-stone-200 rounded text-sm" /></FormField></div>
@@ -1644,7 +1646,7 @@ function BackupModal({ products, clips, onClose, showToast }) {
 
   const sizeKB = (new Blob([json]).size / 1024).toFixed(1);
   const footer = (<div className="grid grid-cols-2 gap-2">
-    <button onClick={tryDownload} className={`font-bold py-2.5 rounded flex items-center justify-center gap-1.5 transition ${downloaded ? 'bg-emerald-500 text-white' : 'bg-stone-900 text-lime-300 hover:bg-stone-800'}`}>{downloaded ? <><CheckCircle2 className="w-4 h-4" /> สำเร็จ</> : <><Download className="w-4 h-4" /> Download</>}</button>
+    <button onClick={tryDownload} className={`font-bold py-2.5 rounded flex items-center justify-center gap-1.5 transition ${downloaded ? 'bg-emerald-500 text-white' : 'bg-lime-400 text-stone-900 hover:bg-lime-300'}`}>{downloaded ? <><CheckCircle2 className="w-4 h-4" /> สำเร็จ</> : <><Download className="w-4 h-4" /> Download</>}</button>
     <button onClick={copyAll} className={`font-bold py-2.5 rounded flex items-center justify-center gap-1.5 transition ${copied ? 'bg-emerald-500 text-white' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>{copied ? <><CheckCircle2 className="w-4 h-4" /> Copied!</> : <><Copy className="w-4 h-4" /> Copy ทั้งหมด</>}</button>
   </div>);
 
