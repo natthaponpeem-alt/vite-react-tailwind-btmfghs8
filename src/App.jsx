@@ -9,27 +9,30 @@ import {
 } from 'lucide-react';
 
 // ============================================================================
-// [ZONE 1] FIREBASE CONFIGURATION (การเชื่อมต่อคลาวด์ Subcollections ระบบ v2.0)
+// [ZONE 1] FIREBASE CONFIGURATION (เชื่อมต่อระบบคลาวด์ Dynamic ผ่านค่าระบบ Sandbox)
 // ============================================================================
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { 
   getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot 
 } from 'firebase/firestore';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDqum6bGwLqInO04PCxuDV8pEl5UbwphI",
-  authDomain: "peem6pack-command.firebaseapp.com",
-  projectId: "peem6pack-command",
-  storageBucket: "peem6pack-command.firebasestorage.app",
-  messagingSenderId: "843579566868",
-  appId: "1:843579566868:web:1daa7700dab2739b757001"
-};
+// ดึงค่า Config และสิทธิ์ระบบจากตัวแปรสากลของ Sandbox ป้องกันอาการหมุนค้างถาวร
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "AIzaSyDqum6bGwLqInO04PCxuDV8pEl5UbwphI",
+      authDomain: "peem6pack-command.firebaseapp.com",
+      projectId: "peem6pack-command",
+      storageBucket: "peem6pack-command.firebasestorage.app",
+      messagingSenderId: "843579566868",
+      appId: "1:843579566868:web:1daa7700dab2739b757001"
+    };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const APP_ID = 'peem6pack-command-v1';
+const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'peem6pack-command-v1';
 
 // ค่าควบคุมเกณฑ์การคำนวณทางธุรกิจ (Business Rules Constants)
 const RESCORE_DAYS = 7; 
@@ -54,7 +57,7 @@ const ABCD_INFO = {
   A: { label: 'A — ขายดี', short: 'A', desc: 'สินค้าขายดี', bg: 'bg-[#0f5144]', text: 'text-[#0f5144]', border: 'border-[#0f5144]/10', lightBg: 'bg-emerald-50/50' },
   B: { label: 'B — มาใหม่', short: 'B', desc: 'สินค้าแนะนำ/กำลังมาแรง', bg: 'bg-[#2563eb]', text: 'text-[#2563eb]', border: 'border-blue-100', lightBg: 'bg-blue-50/50' },
   C: { label: 'C — ประหยัด', short: 'C', desc: 'สินค้าราคาจับต้องง่าย', bg: 'bg-[#d97706]', text: 'text-[#d97706]', border: 'border-amber-100', lightBg: 'bg-amber-50/50' },
-  D: { label: 'D — คอมสูง', short: 'D', desc: 'สินค้าไฮเอนด์ค่าคอมหนา', bg: 'bg-[#7c3aed]', text: 'text-[#7c3aed]', border: 'border-purple-100', lightBg: 'bg-purple-50/50' },
+  D: { label: 'D — ค่าคอมสูง', short: 'D', desc: 'สินค้าไฮเอนด์ค่าคอมหนา', bg: 'bg-[#7c3aed]', text: 'text-[#7c3aed]', border: 'border-purple-100', lightBg: 'bg-purple-50/50' },
   V: { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50/50' },
 };
 
@@ -103,7 +106,7 @@ const getAbcdInfo = (cat) => ABCD_INFO[cat] || ABCD_INFO['V'];
 const getDecisionInfo = (dec) => DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
 const getProductTypeInfo = (typeId) => PRODUCT_TYPES.find(t => t.id === typeId) || { id: 'other', label: 'อื่นๆ', emoji: '📦' };
 
-// กู้ชีพสถิติตัวค้างแจ้งเตือน (ค้างตรวจสถิติแสดงผลค้างไว้ตลอดกาลจนกว่าจะมีค่าวิว)
+// แทร็กยอดวิวค้างแจ้งเตือน ตรึงไว้ตลอดกาลจนกว่าจะมีค่าวิวกรอกจริง
 function getStatsPending(clips) { 
   const pending24h = [], pending7d = []; 
   if (!Array.isArray(clips)) return { pending24h, pending7d };
@@ -297,13 +300,25 @@ export default function App() {
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
-  // 1. Firebase Authentication
+  // 1. Firebase Authentication (แก้ไขให้ดึงค่า Token สากลจาก Sandbox ป้องกันค้าง)
   useEffect(() => {
-    signInAnonymously(auth).catch(() => showToast("เชื่อมคลาวด์ล้มเหลว", "error"));
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth initialization failed:", err);
+        showToast("สิทธิ์การเข้าถึงคลาวด์ล้มเหลว: " + err.message, "error");
+      }
+    };
+    initAuth();
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // 2. Real-time Syncing จากแยกแฟ้ม Subcollections
+  // 2. Real-time Syncing จากแยกแฟ้ม Subcollections (เพิ่ม Error Callbacks ป้องกันล่มเงียบ)
   useEffect(() => {
     if (!user) return;
     setIsSyncing(true);
@@ -311,6 +326,9 @@ export default function App() {
     const settingsRef = doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings');
     const unsubSettings = onSnapshot(settingsRef, (snap) => {
       if (snap.exists()) setMonthlyTarget(snap.data().monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET);
+    }, (err) => {
+      console.error("Settings sync failed:", err);
+      showToast("โหลดการตั้งค่าระบบล้มเหลว", "error");
     });
 
     const prodColRef = collection(db, 'artifacts', APP_ID, 'users', user.uid, 'products');
@@ -319,12 +337,19 @@ export default function App() {
       setProducts(prodList);
       setDbInitialized(true);
       setIsSyncing(false);
+    }, (err) => {
+      console.error("Products sync failed:", err);
+      showToast("โหลดสินค้าจากคลาวด์ล้มเหลว: " + err.message, "error");
+      setDbInitialized(true); // ปลดล็อกหน้าจอโหลดแม้จะเชื่อมล้มเหลว เพื่อแสดงข้อผิดพลาด
     });
 
     const clipColRef = collection(db, 'artifacts', APP_ID, 'users', user.uid, 'clips');
     const unsubClips = onSnapshot(clipColRef, (snap) => {
       const clipList = []; snap.forEach(d => clipList.push({ id: d.id, ...d.data() }));
       setClips(clipList);
+    }, (err) => {
+      console.error("Clips sync failed:", err);
+      showToast("โหลดประวัติคลิปล้มเหลว", "error");
     });
 
     return () => { unsubSettings(); unsubProducts(); unsubClips(); };
@@ -395,11 +420,20 @@ export default function App() {
     return clips.filter(c => new Date(c.postedAt).getTime() >= cutoff).sort((a, b) => new Date(a.postedAt) - new Date(b.postedAt));
   }, [clips]);
 
+  // ระบบ UX ปลอดภัยดึง Toast ขึ้นเรนเดอร์ในหน้าโหลด ป้องกันอาการแอบบอดเงียบ
   if (!dbInitialized) {
     return (
-      <div className="min-h-screen bg-[#061b17] flex flex-col items-center justify-center space-y-4">
+      <div className="min-h-screen bg-[#061b17] flex flex-col items-center justify-center space-y-4 relative">
         <div className="w-14 h-14 border-4 border-emerald-950 border-t-lime-300 rounded-full animate-spin"></div>
         <div className="font-semibold text-emerald-100 tracking-wider text-sm animate-pulse">PEEM6PACK COMMAND CENTER INITIALIZING...</div>
+        {toast && (
+          <div className="absolute bottom-6 right-6 z-50">
+            <div className="px-5 py-3 bg-[#012b25] text-rose-400 rounded-2xl shadow-xl text-xs font-bold border border-rose-900/40 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              {toast.msg}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -632,6 +666,7 @@ export default function App() {
         </div>
       )}
 
+      {/* TOAST PANEL */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 animate-fade-in-up">
           <div className="px-5 py-3 bg-[#012b25] text-[#d9eb54] rounded-2xl shadow-xl text-xs font-bold border border-[#053d34] flex items-center gap-2">
@@ -647,77 +682,19 @@ export default function App() {
 // ============================================================================
 // [ZONE 4] DYNAMIC GRAPHICS & VISUAL CARDS (วิดเจ็ตกราฟแคปซูลมนดึงข้อมูลจริง)
 // ============================================================================
-function CapsuleChart({ data }) {
-  const maxValue = Math.max(...data.map(d => d.value), 100);
+function OverviewKPI({ icon: Icon, label, value, sub, isPrimary = false }) {
   return (
-    <div className="flex justify-between items-end h-56 pt-6 px-2">
-      {data.map((item, idx) => {
-        const heightPct = Math.round((item.value / maxValue) * 100);
-        const isHighlight = item.label === '07'; 
-        return (
-          <div key={idx} className="flex flex-col items-center flex-1 group relative">
-            <div className={`absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-[#012b25] text-white text-[9px] font-mono font-bold px-2 py-1 rounded-md shadow-md z-10 ${
-              isHighlight ? 'opacity-100 -top-8' : ''
-            }`}>
-              ฿{fmtNum(item.value)}
-            </div>
-            <div className="w-6 md:w-8 bg-[#f3f6f5] rounded-full h-40 flex items-end overflow-hidden border border-slate-100">
-              <div 
-                className={`w-full rounded-full transition-all duration-700 ${
-                  isHighlight ? 'bg-[#0a4d40] striped-bar h-[85%]' : 'bg-[#0a4d40]'
-                }`} 
-                style={{ height: `${heightPct}%` }}
-              />
-            </div>
-            <span className="text-[10px] text-slate-400 font-mono font-bold mt-2">{item.label}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function HeatmapGrid({ clips }) {
-  const days = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const hours = ['9 am', '10 am', '11 am', '12 pm', '1 pm', '2 pm', '3 pm'];
-  
-  const heatMapValues = useMemo(() => {
-    const grid = Array(7).fill(0).map(() => Array(7).fill(0));
-    if (!Array.isArray(clips)) return grid;
-    
-    clips.forEach(c => {
-      if (!c.postedAt) return;
-      const date = new Date(c.postedAt);
-      const day = date.getDay(); 
-      const hour = date.getHours(); 
-      const dayIdxMap = [1, 2, 3, 4, 5, 6, 0]; 
-      const dayIdx = dayIdxMap[day];
-
-      let hourIdx = -1;
-      if (hour >= 9 && hour <= 15) hourIdx = hour - 9;
-      if (dayIdx >= 0 && dayIdx < 7 && hourIdx >= 0 && hourIdx < 7) grid[hourIdx][dayIdx] += 1;
-    });
-    return grid;
-  }, [clips]);
-
-  const maxHeat = useMemo(() => Math.max(...heatMapValues.flat(), 1), [heatMapValues]);
-
-  return (
-    <div className="grid grid-cols-8 gap-1.5 text-[9px] text-slate-400 font-bold font-mono">
-      <div />
-      {days.map(d => <div key={d} className="text-center">{d}</div>)}
-      {hours.map((h, hrIdx) => (
-        <React.Fragment key={h}>
-          <div className="text-right pr-2 self-center">{h}</div>
-          {days.map((d, dayIdx) => {
-            const val = heatMapValues[hrIdx][dayIdx];
-            const color = val === 0 ? 'bg-slate-100' : (val / maxHeat > 0.7 ? 'bg-[#0a4d40]' : val / maxHeat > 0.4 ? 'bg-[#186a5a]/60' : 'bg-[#186a5a]/25');
-            return (
-              <div key={`${d}-${h}`} className={`h-4 rounded-[4px] transition-all duration-300 ${color} hover:scale-110 cursor-pointer`} title={`สถิติจำนวนโพสต์: ${val} คลิป`} />
-            );
-          })}
-        </React.Fragment>
-      ))}
+    <div className={`rounded-3xl p-6 shadow-sm flex flex-col justify-between min-h-[140px] transition-all duration-300 hover:scale-[1.01] ${
+      isPrimary ? 'bg-[#012b25] text-white border border-[#033c32]' : 'bg-white text-[#0d2a23] border border-slate-200/60'
+    }`}>
+      <div className="flex justify-between items-start">
+        <span className={`text-[11px] font-bold uppercase tracking-wider ${isPrimary ? 'text-emerald-400/80' : 'text-slate-400'}`}>{label}</span>
+        <div className={`p-2.5 rounded-xl ${isPrimary ? 'bg-[#093c33] text-[#d9eb54]' : 'bg-slate-50 text-slate-400'}`}><Icon className="w-4 h-4" /></div>
+      </div>
+      <div>
+        <div className="font-display text-2xl md:text-3xl tracking-tight leading-none">{value}</div>
+        <div className={`text-[10px] mt-1.5 font-medium ${isPrimary ? 'text-emerald-300/70' : 'text-slate-400'}`}>{sub}</div>
+      </div>
     </div>
   );
 }
@@ -876,19 +853,23 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
                 {statsPending.pending24h.concat(statsPending.pending7d).length === 0 ? (
                   <tr><td colSpan="4" className="p-6 text-center text-slate-400 italic">🎉 อัปเดตสถิติวิดีโอครบหมดแล้ว</td></tr>
                 ) : (
-                  statsPending.pending24h.concat(statsPending.pending7d).slice(0, 5).map(c => {
-                    const is7d = hoursSince(c.postedAt) >= 156;
-                    return (
+                  statsPending.pending24h.map(c => (
+                    <tr key={c.id} className="hover:bg-slate-50/50">
+                      <td className="p-3 truncate max-w-[150px] font-medium text-slate-800">{c.hook || 'ไม่มี Hook'}</td>
+                      <td className="p-3"><span className="text-[10px] bg-sky-50 text-sky-700 px-2 py-0.5 rounded-md font-semibold">24 Hours</span></td>
+                      <td className="p-3"><span className="w-2.5 h-2.5 bg-amber-400 rounded-full inline-block animate-pulse" /></td>
+                      <td className="p-3 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold">อัปเดตสถิติ</button></td>
+                    </tr>
+                  )).concat(
+                    statsPending.pending7d.map(c => (
                       <tr key={c.id} className="hover:bg-slate-50/50">
                         <td className="p-3 truncate max-w-[150px] font-medium text-slate-800">{c.hook || 'ไม่มี Hook'}</td>
-                        <td className="p-3">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${is7d ? 'bg-purple-50 text-purple-700' : 'bg-sky-50 text-sky-700'}`}>{is7d ? '7 Days' : '24 Hours'}</span>
-                        </td>
-                        <td className="p-3"><span className="w-2.5 h-2.5 bg-amber-400 rounded-full inline-block animate-pulse" /></td>
+                        <td className="p-3"><span className="text-[10px] bg-purple-50 text-[#7c3aed] px-2 py-0.5 rounded-md font-semibold">7 Days</span></td>
+                        <td className="p-3"><span className="w-2.5 h-2.5 bg-purple-400 rounded-full inline-block animate-pulse" /></td>
                         <td className="p-3 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold">อัปเดตสถิติ</button></td>
                       </tr>
-                    );
-                  })
+                    ))
+                  )
                 )}
               </tbody>
             </table>
@@ -1040,7 +1021,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
           <div className="overflow-x-auto pt-2">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
               <thead>
-                <tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider">
+                <tr className="bg-slate-50/80 font-bold border-b border-slate-100 uppercase text-[10px] tracking-wider">
                   <th className="p-4">Product ID</th>
                   <th className="p-4">Product Name</th>
                   <th className="p-4">Price</th>
@@ -1412,7 +1393,7 @@ function ClipLogPage({ products, clips, onEditClip }) {
           </div>
         </div>
       </div>
-      <div className="relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clip hook..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-[#012b25]" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
+      <div className="relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clip hook..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
       
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse text-slate-600">
@@ -1574,12 +1555,14 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
 
   return (
     <div className="space-y-6">
+      {/* RESTORED & PROMOTED: Dynamic Strategic Target Planner Card */}
       <div className="bg-[#012b25] text-white rounded-3xl p-6 md:p-8 shadow-xl border border-[#043d34] space-y-6">
         <div>
           <h3 className="font-display text-lg text-lime-400 flex items-center gap-2"><Target className="w-5 h-5" /> Strategic Target Planner (คำนวณจำนวนสินค้าพิชิตเป้าหมาย)</h3>
           <p className="text-xs text-emerald-300">ประมวลผลเป้าค่าคอมมิชชันรายเดือน ฿{fmtNum(MONTHLY_REVENUE_TARGET)} เทียบสัดส่วนราคากับ % คอมมิชชันสะสมจริง</p>
         </div>
 
+        {/* Current status bar */}
         <div className="bg-[#033c32] p-5 rounded-2xl border border-[#065345] grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ประมาณการค่าคอมมิชชันปัจจุบัน</span>
@@ -1595,6 +1578,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           </div>
         </div>
 
+        {/* Dynamic target breakdown list */}
         <div className="space-y-2.5">
           <span className="text-xs font-bold text-emerald-200 uppercase tracking-wider block">📊 จำนวนชิ้นที่ต้องการขายคนเดียวแยกรายสินค้าเพื่อบรรลุเป้าหมายช่องหลัก:</span>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-1">
@@ -1618,12 +1602,14 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
+      {/* Period Selection Bar */}
       <div className="flex justify-end gap-1.5 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm self-end">
         {['7', '30', '90'].map(d => (
           <button key={d} onClick={() => setPeriod(d)} className={`text-xs font-bold px-4 py-2 rounded-xl border transition-all ${period === d ? 'bg-[#012b25] text-white border-transparent' : 'bg-slate-50 text-slate-500'}`}>{d} วันล่าสุด</button>
         ))}
       </div>
 
+      {/* PORTFOLIO BALANCE MONITOR */}
       {portfolioBalance && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Target className="w-4 h-4 text-emerald-800" /> ตรวจสอบสมดุลสัดส่วนช่อง (Portfolio Balance Target)</h3>
@@ -1652,7 +1638,9 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       )}
 
+      {/* E-CANDIDATES & PRODUCTS TO CUT ROW */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* E-Candidates */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-purple-600" /> 💎 ตรวจพบสินค้านางฟ้า (E-Candidates)</h3>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">แบรนด์ระดับดาวรุ่งรอขยับหมวดเป็น A</p>
@@ -1681,6 +1669,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           </div>
         </div>
 
+        {/* Products to Cut */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><AlertTriangle className="w-4 h-4 text-rose-500" /> ⚠️ เกณฑ์พิจารณาถอดออกจากสิทธิ์พอร์ต (Cut Candidates)</h3>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">แบรนด์ที่ควรหยุดทำคลิปเพื่อเซฟงบแอดสเปน</p>
@@ -1703,7 +1692,9 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
+      {/* CATEGORY & PILLAR BARS ANALYSIS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* ABCD Category GMV breakdown */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25]">🎯 วิเคราะห์สัดส่วนผลงานรายหมวด ABCD ({period}d)</h3>
           <div className="space-y-4">
@@ -1720,6 +1711,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
                     <span className="font-mono text-slate-800">฿{fmtNum(s.gmv)} <span className="text-slate-400 font-normal">({s.count} คลิป, เฉลี่ย ฿{fmtNum(s.count > 0 ? Math.round(s.gmv / s.count) : 0)})</span></span>
                   </div>
                   <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    {/* FIXED: แก้ไขการใช้ตัวแปร statusColors ที่ไม่เคยถูกประกาศในลูปนี้ ให้ดึงสีตรงจาก info.bg ดั้งเดิมอย่างเสถียร */}
                     <div className={`h-full rounded-full ${info.bg}`} style={{ width: `${barWidth}%` }}></div>
                   </div>
                 </div>
@@ -1728,6 +1720,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           </div>
         </div>
 
+        {/* Pillar distribution charts */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25]">📚 อัตราการคุมสัดส่วน Variety ตามเสา Pillar ({period}d)</h3>
           <div className="space-y-4">
@@ -1750,6 +1743,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
+      {/* MONTHLY DOUBLE BAR GRID COMPARE */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <h3 className="font-display text-base text-[#012b25]">📅 เปรียบเทียบปริมาณคลิป และ ยอด GMV ตลอด 6 เดือนย้อนหลัง</h3>
         <div className="grid grid-cols-6 gap-3 pt-4">
@@ -1774,6 +1768,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
+      {/* ALGORITHMIC RECOMMENDATION LIST */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Lightbulb className="w-4 h-4 text-amber-500" /> 💡 คำแนะนำประมวลผลพอร์ตอัจฉริยะ (Recommendations)</h3>
         <div className="space-y-3">
