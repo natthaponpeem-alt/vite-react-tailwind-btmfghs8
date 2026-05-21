@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Home, Package, Lock, BarChart3, Settings, Plus, X, Copy, Download, 
-  Upload, Trash2, Edit3, ChevronRight, ChevronLeft, AlertCircle, 
-  CheckCircle2, Clock, Zap, Target, Wand2, FileText, Sparkles, 
-  Trophy, Search, RefreshCw, DollarSign, Activity, LayoutGrid, 
-  List, ArrowUpDown, ExternalLink, Database, Flame, TrendingUp, 
-  TrendingDown, AlertTriangle, Lightbulb, Repeat, Cloud, CloudOff, 
-  User, Check, Eye, HelpCircle, Bell, ArrowUpRight
+  Trash2, Edit3, ChevronLeft, AlertCircle, CheckCircle2, Clock, Zap, 
+  Target, Wand2, FileText, Trophy, Search, DollarSign, Activity, 
+  LayoutGrid, List, ArrowUpDown, ExternalLink, Database, Flame, 
+  TrendingUp, TrendingDown, AlertTriangle, Lightbulb, Repeat, Cloud, 
+  CloudOff, User, Check, Bell, ToggleLeft, ToggleRight
 } from 'lucide-react';
 
 // ============================================================================
@@ -19,7 +18,7 @@ import {
 } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDqum6bGwLqjInO04PCxuDV8pEl5UbwphI",
+  apiKey: "AIzaSyDqum6bGwLqInO04PCxuDV8pEl5UbwphI",
   authDomain: "peem6pack-command.firebaseapp.com",
   projectId: "peem6pack-command",
   storageBucket: "peem6pack-command.firebasestorage.app",
@@ -33,16 +32,11 @@ const db = getFirestore(app);
 const APP_ID = 'peem6pack-command-v1';
 
 // ค่าควบคุมเกณฑ์การคำนวณทางธุรกิจ (Business Rules Constants)
-const TARGET_ANGLES = 7; 
 const RESCORE_DAYS = 7; 
 const PICK_THRESHOLD = 83; 
 const WAIT_THRESHOLD = 55; 
-const ARGOON_MAX = 18; 
-const ARGOON_PASS = 15; 
-const ARGOON_WATCH = 10; 
 const WINNER_GMV = 1000; 
 const CONCENTRATION_LIMIT = 60; 
-const REPOST_INTERVALS = [7, 14, 30]; 
 const PORTFOLIO_TARGET = { A: 60, B: 25, C: 10, D: 5 }; 
 const BLENDED_COMMISSION_TARGET = 15; 
 const DEFAULT_MONTHLY_CLIP_TARGET = 150;
@@ -93,12 +87,6 @@ const PAIN_SOURCES = [
   { id: 'personal', label: '👤 ประสบการณ์ตรง' }
 ];
 
-const CLIP_LEVELS = [
-  { id: 'traffic', label: 'Traffic', color: 'bg-sky-500' }, 
-  { id: 'consideration', label: 'Consideration', color: 'bg-[#7c3aed]' }, 
-  { id: 'conversion', label: 'Conversion', color: 'bg-[#f43f5e]' }
-];
-
 // ============================================================================
 // [ZONE 2] CORE CALCULATIONS & DATA FORMATTERS (ระบบประมวลผลข้อมูลหลังบ้าน)
 // ============================================================================
@@ -106,37 +94,23 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).substr(2,
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 const daysSince = (iso) => !iso ? 999 : Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-const daysUntilRescore = (iso) => RESCORE_DAYS - daysSince(iso);
 const fmtDate = (iso) => { if (!iso) return '-'; const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${(d.getFullYear() + 543).toString().slice(2)}`; };
 const fmtNum = (n) => (n ?? 0).toLocaleString('th-TH');
 const truncate = (s, n) => !s ? '' : s.length > n ? s.slice(0, n) + '…' : s;
 const hoursSince = (iso) => !iso ? 999 : (Date.now() - new Date(iso).getTime()) / 3600000;
 
-// ปลอกดักจับความปลอดภัยตัวแปร (Fallback Safety Guards)
-const getAbcdInfo = (cat) => {
-  return ABCD_INFO[cat] || ABCD_INFO['V'] || { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50/50' };
-};
+const getAbcdInfo = (cat) => ABCD_INFO[cat] || ABCD_INFO['V'];
+const getDecisionInfo = (dec) => DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
+const getProductTypeInfo = (typeId) => PRODUCT_TYPES.find(t => t.id === typeId) || { id: 'other', label: 'อื่นๆ', emoji: '📦' };
 
-const getDecisionInfo = (dec) => {
-  return DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
-};
-
-const getProductTypeInfo = (typeId) => {
-  return PRODUCT_TYPES.find(t => t.id === typeId) || { id: 'other', label: 'อื่นๆ', emoji: '📦' };
-};
-
-// แก้ไขสคริปต์ "ดักเตือนสถิติ" ให้แสดงผลค้างเตือนตลอดกาลจนกว่าจะมีค่าวิวกรอกจริง
+// กู้ชีพสถิติตัวค้างแจ้งเตือน (ค้างตรวจสถิติแสดงผลค้างไว้ตลอดกาลจนกว่าจะมีค่าวิว)
 function getStatsPending(clips) { 
   const pending24h = [], pending7d = []; 
   if (!Array.isArray(clips)) return { pending24h, pending7d };
   clips.forEach(c => { 
     const hrs = hoursSince(c.postedAt); 
-    if (hrs >= 22 && (c.views24h === null || c.views24h === undefined || c.views24h === '')) {
-      pending24h.push(c); 
-    }
-    if (hrs >= 156 && (c.views7d === null || c.views7d === undefined || c.views7d === '')) {
-      pending7d.push(c); 
-    }
+    if (hrs >= 22 && (c.views24h === null || c.views24h === undefined || c.views24h === '')) pending24h.push(c); 
+    if (hrs >= 156 && (c.views7d === null || c.views7d === undefined || c.views7d === '')) pending7d.push(c); 
   }); 
   return { pending24h, pending7d }; 
 }
@@ -148,7 +122,6 @@ function calcScore(sc = {}) {
   if (commission !== null && !isNaN(commission)) { total += commission >= 20 ? 3 : commission >= 15 ? 2 : commission >= 10 ? 1 : 0; max += 3; } 
   const g7 = cv(sc.gmv7dPct), g30 = cv(sc.gmv30dPct); 
   if (g7 !== null && g30 !== null && !isNaN(g7) && !isNaN(g30)) { if (g7 > 0 && g30 > 0) total += 3; else if (g7 < 0 && g30 < 0) total += 1; else total += 2; max += 3; } 
-  else if (g7 !== null && !isNaN(g7)) { total += g7 > 0 ? 2 : 1; max += 3; } 
   const creators = cv(sc.creatorCount); 
   if (creators !== null && !isNaN(creators)) { total += creators <= 500 ? 3 : creators <= 1000 ? 2 : 1; max += 3; } 
   const angles = cv(sc.anglesCount); 
@@ -162,16 +135,6 @@ function calcScore(sc = {}) {
 
 function getDecision(pct) { return pct >= PICK_THRESHOLD ? 'PICK' : pct >= WAIT_THRESHOLD ? 'WAIT' : 'DROP'; }
 
-function autoClassify({ gmv30d, commission, tiktokRank, price }) { 
-  const g = Number(gmv30d) || 0; const c = Number(commission) || 0; const rank = Number(tiktokRank) || 0; const pr = Number(price) || 0; 
-  if (g >= 30000) { if (c >= 15) return { cat: 'A', label: 'A — ideal', reason: 'Mass + คอมดี = A ideal', confidence: 'high' }; return { cat: 'A', label: 'A (proven exception)', reason: 'Mass = ฐานรายได้แม้คอมต่ำ', confidence: 'high' }; } 
-  if (g >= 10000) { if (pr > 0 && pr < 500 && c < 20) return { cat: 'C', label: 'C (low-price + mass)', reason: `ราคา ฿${pr} + GMV ฿${fmtNum(g)} = mass low-ticket → C traffic driver`, confidence: 'medium' }; if (c >= 20) return { cat: 'B', label: 'B → A potential', reason: 'กำลังพิสูจน์ตัว ใกล้ E', confidence: 'medium' }; return { cat: 'B', label: 'B', reason: 'Volume ปานกลาง — เทสต่อ', confidence: 'medium' }; } 
-  if (g >= 1000) { if (pr >= 800 && c >= 20) return { cat: 'D', label: 'D (premium)', reason: `ราคา ฿${pr} + คอม ${c}% — กินกำไรเป็นรอบ ห้าม auto-promote A`, confidence: 'medium' }; if (pr > 0 && pr < 500) return { cat: 'C', label: 'C (low-price, low-vol)', reason: `ราคา ฿${pr} — traffic driver / repeat buy`, confidence: 'low' }; if (c >= 20) return { cat: 'D', label: 'D', reason: 'คอมสูงแต่ volume ไม่ถึง mass — D ตามนิยาม', confidence: 'medium' }; if (c >= 10) return { cat: 'C', label: 'C', reason: 'Volume น้อย คอมปานกลาง — ดู price/repeat-buy', confidence: 'low' }; return { cat: 'C', label: 'C / Cut', reason: 'Volume + คอมต่ำ — พิจารณาตัด', confidence: 'low' }; } 
-  if (rank >= 1 && rank <= 5) return { cat: 'B', label: 'B (Top 1-5 untested)', reason: 'Mass ใน TikTok แต่ยังไม่เทสในช่อง', confidence: 'medium' }; 
-  if (rank >= 6 && rank <= 20) return { cat: 'B', label: 'B (Top 10-20)', reason: 'Demand ปานกลาง — testing zone', confidence: 'medium' }; 
-  return { cat: 'B', label: 'B (ใหม่)', reason: 'ยังไม่มี data — เริ่มเทส', confidence: 'low' }; 
-}
-
 function getPortfolioBalance(products, clips, days = 30) { 
   const byCat = { A: 0, B: 0, C: 0, D: 0 }; let total = 0; 
   if (!Array.isArray(products)) return null;
@@ -181,11 +144,11 @@ function getPortfolioBalance(products, clips, days = 30) {
 }
 
 function getBlendedCommission(products, clips, days = 30) { 
-  let weightedSum = 0, totalGMV = 0; const breakdown = []; 
+  let weightedSum = 0, totalGMV = 0; 
   if (!Array.isArray(products)) return null;
-  products.forEach(p => { const sales = getProductSales(p, clips, days); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; breakdown.push({ product: p, gmv: sales.primary, commission: c, contribution: sales.primary * c }); } }); 
+  products.forEach(p => { const sales = getProductSales(p, clips, days); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; } }); 
   if (totalGMV === 0) return null; 
-  return { blended: Math.round((weightedSum / totalGMV) * 100) / 100, target: BLENDED_COMMISSION_TARGET, totalGMV, breakdown }; 
+  return { blended: Math.round((weightedSum / totalGMV) * 100) / 100, target: BLENDED_COMMISSION_TARGET, totalGMV }; 
 }
 
 function getCategoryStack(products, clips, category) {
@@ -195,46 +158,30 @@ function getCategoryStack(products, clips, category) {
     const sales30d = getProductSales(p, clips, 30).primary;
     const sales7d = getProductSales(p, clips, 7).primary;
     const momentum = (sales30d / 30) > 0 ? (sales7d / 7) / (sales30d / 30) : 1;
-    const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonth()).length;
-    return { product: p, sales30d, sales7d, momentum, clipsThisMonth };
+    return { product: p, sales30d, sales7d, momentum };
   }).sort((a, b) => b.sales30d - a.sales30d);
 
   return withData.map((s, i) => {
-    let tier, frequency, targetMonth;
-    if (i < 2) { tier = 'HOT'; frequency = '3-4 คลิป/wk'; targetMonth = 14; }
-    else if (i < 4) { tier = 'STEADY'; frequency = '1-2 คลิป/wk'; targetMonth = 6; }
-    else { tier = 'PASSIVE'; frequency = '2-3 คลิป/เดือน'; targetMonth = 2.5; }
-    const atRisk = s.momentum > 0 && s.momentum < 0.8;
-    return { ...s, rank: i + 1, tier, frequency, targetMonth, atRisk };
+    let tier = i < 2 ? 'HOT' : i < 4 ? 'STEADY' : 'PASSIVE';
+    let targetMonth = tier === 'HOT' ? 14 : tier === 'STEADY' ? 6 : 2.5;
+    return { ...s, rank: i + 1, tier, targetMonth };
   });
 }
 
 function getECandidates(products, clips) {
   if (!Array.isArray(products)) return [];
   return products.map(p => {
-    if (p.category === 'A') return null;
-    if (daysSince(p.createdAt) < 14) return null;
+    if (p.category === 'A' || daysSince(p.createdAt) < 14) return null;
     const sales30d = getProductSales(p, clips, 30).primary;
     const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length;
-    const rank = Number(p.tiktokRank) || 0;
-    const commission = Number(p.scorecard?.commission || p.scorecard?.commission === 0 ? p.scorecard.commission : 0);
+    const commission = Number(p.scorecard?.commission || 0);
 
     let eScore = 0; const reasons = [];
-    if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)} (mass)`); }
-    else if (sales30d >= 10000) { eScore += 1; reasons.push(`GMV ฿${fmtNum(sales30d)}`); }
-    if (winnerCount >= 2) { eScore += 2; reasons.push(`${winnerCount} winner clips`); }
-    else if (winnerCount === 1) { eScore += 1; reasons.push('1 winner clip'); }
-    if (rank > 0 && rank <= 10) { eScore += 1; reasons.push(`Top #${rank} ตลาด`); }
-    if (commission >= 15) { eScore += 1; reasons.push(`คอม ${commission}% ดี`); }
-    if (p.isShopAds) { eScore += 1; reasons.push('Shop Ads 🛒'); }
+    if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)}`); }
+    if (winnerCount >= 1) { eScore += 1; reasons.push(`${winnerCount} Winner Clip`); }
+    if (commission >= 15) { eScore += 1; reasons.push(`คอม ${commission}%`); }
     if (eScore < 2) return null;
-
-    let confidence, advice;
-    if (eScore >= 5) { confidence = 'high'; advice = 'ย้ายเป็น A เพื่อขยี้คอนเทนต์'; }
-    else if (eScore >= 3) { confidence = 'medium'; advice = 'พิจารณาย้าย / เทสต่อ 1-2 wk'; }
-    else { confidence = 'low'; advice = 'มี signal เริ่มต้น — เทสต่อ'; }
-
-    return { product: p, eScore, confidence, reasons, sales30d, winnerCount, advice };
+    return { product: p, reasons, eScore };
   }).filter(Boolean).sort((a, b) => b.eScore - a.eScore);
 }
 
@@ -242,12 +189,11 @@ function getROIAnalysis(products, clips, monthlyTargetGMV) {
   if (!Array.isArray(products)) return { items: [], totalCommRevenue: 0, gap: monthlyTargetGMV, pct: 0 };
   const items = products.map(p => {
     const sales30d = getProductSales(p, clips, 30).primary;
-    const commission = Number(p.scorecard?.commission || p.scorecard?.commission === 0 ? p.scorecard.commission : 0);
+    const commission = Number(p.scorecard?.commission || 0);
     const price = Number(p.price) || 0;
-    const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0;
+    const commPerOrder = (price * commission) / 100;
     const currentCommRevenue = sales30d * commission / 100;
-    const ordersNeededAlone = commPerOrder > 0 ? Math.ceil(monthlyTargetGMV / commPerOrder) : null;
-    return { product: p, sales30d, commission, price, commPerOrder, currentCommRevenue, ordersNeededAlone };
+    return { product: p, sales30d, commission, price, commPerOrder, currentCommRevenue };
   }).filter(i => i.sales30d > 0 || i.commPerOrder > 0).sort((a, b) => b.currentCommRevenue - a.currentCommRevenue);
 
   const totalCommRevenue = items.reduce((s, i) => s + i.currentCommRevenue, 0);
@@ -257,25 +203,14 @@ function getROIAnalysis(products, clips, monthlyTargetGMV) {
 function getProductsToCut(products, clips) {
   if (!Array.isArray(products)) return [];
   return products.map(p => {
-    const reasons = []; const commission = Number(p.scorecard?.commission || p.scorecard?.commission === 0 ? p.scorecard.commission : 0);
+    const reasons = []; const commission = Number(p.scorecard?.commission || 0);
     const sales = getProductSales(p, clips, 30);
-    if (commission > 0 && commission <= 5 && sales.primary < 30000) reasons.push(`คอม ${commission}% ≤5%`);
-    if (p.scorePct && p.maxScore >= 12 && p.scorePct < WAIT_THRESHOLD) reasons.push(`Argoon ${p.score}/${p.maxScore} = CUT`);
-    const g7 = Number(p.scorecard?.gmv7dPct); const g30 = Number(p.scorecard?.gmv30dPct);
-    if (!isNaN(g7) && !isNaN(g30) && g7 < -20 && g30 < -20) reasons.push(`GMV ตกหนัก ${g7}% / ${g30}%`);
-    if (daysSince(p.createdAt) >= 14 && sales.primary === 0 && sales.clipCount === 0) reasons.push('ไม่มีกิจกรรม 30d');
+    if (commission > 0 && commission <= 5 && sales.primary < 30000) reasons.push(`คอมต่ำ ≤ 5%`);
+    if (p.scorePct && p.scorePct < WAIT_THRESHOLD) reasons.push(`เกณฑ์ Argoon < 55%`);
+    if (daysSince(p.createdAt) >= 14 && sales.primary === 0) reasons.push('ไม่มีการเคลื่อนไหว 14d');
     if (reasons.length === 0) return null;
-    return { product: p, reasons, severity: reasons.length };
-  }).filter(Boolean).sort((a, b) => b.severity - a.severity);
-}
-
-function getRevenuePerClip(productId, clips, days = 7) {
-  if (!Array.isArray(clips)) return { revPerClip: 0, totalGMV: 0, clipCount: 0 };
-  const cutoff = Date.now() - days * 86400000;
-  const pclips = clips.filter(c => c.productId === productId && new Date(c.postedAt).getTime() >= cutoff);
-  if (pclips.length === 0) return { revPerClip: 0, totalGMV: 0, clipCount: 0 };
-  const totalGMV = pclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0);
-  return { revPerClip: totalGMV / pclips.length, totalGMV, clipCount: pclips.length };
+    return { product: p, reasons };
+  }).filter(Boolean);
 }
 
 function getProductSales(product, clips, days) {
@@ -358,18 +293,17 @@ export default function App() {
   const [makeSimilarClip, setMakeSimilarClip] = useState(null);
   const [showBackup, setShowBackup] = useState(false);
 
-  // Custom modal state for 2-rules warning gate
   const [showGateWarning, setShowGateWarning] = useState(null); 
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
   // 1. Firebase Authentication
   useEffect(() => {
-    signInAnonymously(auth).catch(err => showToast("เชื่อมคลาวด์ล้มเหลว", "error"));
+    signInAnonymously(auth).catch(() => showToast("เชื่อมคลาวด์ล้มเหลว", "error"));
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // 2. Real-time Syncing จากแยกแฟ้ม Subcollections (แก้ปัญหา 1MB)
+  // 2. Real-time Syncing จากแยกแฟ้ม Subcollections
   useEffect(() => {
     if (!user) return;
     setIsSyncing(true);
@@ -396,37 +330,6 @@ export default function App() {
     return () => { unsubSettings(); unsubProducts(); unsubClips(); };
   }, [user]);
 
-  // ระบบย้ายข้อมูลสไตล์ Monolith -> Subcollection
-  const handleLegacyMigration = async (jsonData) => {
-    if (!user) return;
-    setMigrationLog("กำลังเริ่มต้นรื้อถอนและย้ายสิทธิ์ข้อมูล...");
-    try {
-      const parsed = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-      if (!parsed.products && !parsed.clips) {
-        showToast("รูปแบบไฟล์สำรองไม่ถูกต้อง", "error");
-        return;
-      }
-      if (parsed.monthlyTarget) {
-        await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings'), { monthlyTarget: parsed.monthlyTarget });
-      }
-      let pCount = 0;
-      for (const p of parsed.products) {
-        await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', p.id), p);
-        pCount++;
-      }
-      let cCount = 0;
-      for (const c of parsed.clips) {
-        await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id), c);
-        cCount++;
-      }
-      setMigrationLog(`🎉 สำเร็จ! ย้ายฐานข้อมูลเข้ากล่องใหม่เรียบร้อย: สินค้า ${pCount} รายการ, คลิป ${cCount} คลิป ปลอดภัยจากขีดจำกัด 1MB 100%`);
-      showToast("ระบบอัพเกรดเป็น v2.0 สำเร็จ!");
-    } catch (e) {
-      setMigrationLog(`❌ พัง: ${e.message}`);
-      showToast("ย้ายข้อมูลขัดข้อง", "error");
-    }
-  };
-
   const updateProductInCloud = async (id, data) => {
     if (!user) return;
     await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', id), data, { merge: true });
@@ -445,7 +348,6 @@ export default function App() {
     showToast('คัดกรองคะแนนใหม่สำเร็จ!');
   };
 
-  // Safe Alert-Free Custom Delete Calls
   const executeDeleteProduct = async (id) => {
     await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', id));
     setPage('products'); 
@@ -463,13 +365,19 @@ export default function App() {
     for (const p of products) await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', p.id));
     for (const c of clips) await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id));
     setConfirmClearDb(false);
-    setShowSettings(false); 
+    setPage('home'); 
     showToast('เคลียร์คลาวด์หมดจดแล้ว');
   };
 
   const addClip = async (data) => {
     if (!user) return; const id = uid();
-    await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', id), { id, ...data, postedAt: data.postedAt || new Date().toISOString(), createdAt: new Date().toISOString() });
+    await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', id), { 
+      id, ...data, 
+      paymentStatus: data.paymentStatus || 'pending',
+      gencodeVerified: data.gencodeVerified || false,
+      postedAt: data.postedAt || new Date().toISOString(), 
+      createdAt: new Date().toISOString() 
+    });
     showToast('บันทึกคลิปลงคลังสำเร็จ!');
   };
 
@@ -477,13 +385,6 @@ export default function App() {
     if (!user) return;
     await updateDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', id), patch);
     showToast('อัพเดทคลิปแล้ว!');
-  };
-
-  const markRepostDone = async (clipId, bucket) => {
-    const clip = clips.find(c => c.id === clipId); if (!clip) return;
-    const rs = { ...(clip.repostStatus || {}) }; const key = `d${bucket}`;
-    rs[key] = rs[key] ? null : new Date().toISOString();
-    await updateClip(clipId, { repostStatus: rs });
   };
 
   const selectedProduct = selectedProductId ? products.find(p => p.id === selectedProductId) : null;
@@ -514,10 +415,9 @@ export default function App() {
         }
       `}</style>
 
-      {/* PREMIUM DEEP EMERALD SIDEBAR WITH 5 RESTRUCTURED TABS */}
+      {/* PREMIUM DEEP EMERALD SIDEBAR WITH 6 RESTRUCTURED TABS */}
       <aside className="w-full lg:w-72 bg-[#012b25] text-white flex flex-col justify-between flex-shrink-0 shadow-2xl relative z-20">
         <div>
-          {/* Logo Brand Header */}
           <div className="p-7 flex items-center justify-between border-b border-[#053d34]">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 bg-[#d9eb54] text-[#012b25] rounded-xl flex items-center justify-center font-extrabold text-xl shadow-lg">P6</div>
@@ -529,14 +429,14 @@ export default function App() {
             {isSyncing ? <CloudOff className="w-4 h-4 text-amber-400 animate-pulse" /> : <Cloud className="w-4 h-4 text-emerald-400" />}
           </div>
 
-          {/* Restructured Navigation Lists (V2.6 SaaS Standard) */}
           <nav className="p-5 space-y-1.5">
             {[
               { id: 'home', label: 'Overview', icon: Home },
               { id: 'products', label: 'Products', icon: Package },
               { id: 'lock', label: 'Lock Focus', icon: Lock },
               { id: 'analytics', label: 'Analytics (วิเคราะห์พอร์ต)', icon: BarChart3 },
-              { id: 'log', label: 'Clip Logs (คลังวิดีโอ)', icon: Database }
+              { id: 'log', label: 'Clip Logs (คลังวิดีโอ)', icon: Database },
+              { id: 'settings', label: 'Settings (ตั้งค่าช่อง)', icon: Settings }
             ].map(item => {
               const Icon = item.icon; const active = page === item.id;
               return (
@@ -555,7 +455,6 @@ export default function App() {
           </nav>
         </div>
         
-        {/* Upgrade / Account Box */}
         <div className="p-5 border-t border-[#053d34]">
           <div className="bg-[#033c32] rounded-3xl p-5 mb-5 border border-[#095246] relative overflow-hidden">
             <div className="absolute -right-8 -top-8 w-24 h-24 bg-[#d9eb54]/5 rounded-full" />
@@ -564,16 +463,15 @@ export default function App() {
             <p className="text-[10px] text-emerald-300/70 mt-1 leading-relaxed">ปลดล็อคโมดูลคำนวณและสถิติกราฟ AI ปั่นสคริปต์ได้ไม่จำกัด</p>
             <button className="w-full bg-[#d9eb54] text-[#012b25] text-xs font-bold py-2.5 rounded-xl transition-all shadow-md mt-4 hover:bg-[#eaf96c]">Upgrade Now</button>
           </div>
-          <div className="flex gap-2 text-xs">
+          <div className="flex gap-2 text-xs font-display">
             <button onClick={() => { setClipForVOnly(true); setShowAddClip(true); }} className="flex-1 bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold py-3 rounded-2xl transition-all shadow-md flex items-center justify-center gap-1">+ บันทึกคลิป</button>
-            <button onClick={() => setShowSettings(true)} className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white transition-all"><Settings className="w-4 h-4" /></button>
+            <button onClick={() => setPage('settings')} className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white transition-all"><Settings className="w-4 h-4" /></button>
           </div>
         </div>
       </aside>
 
       {/* CONTENT AREA (Pharmly Layout Style) */}
       <main className="flex-1 overflow-y-auto pb-24 lg:pb-10">
-        {/* Premium Breadcrumb Header */}
         <header className="bg-white border-b border-[#e9eceb] px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sticky top-0 z-10">
           <div>
             <div className="text-[11px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1">
@@ -584,7 +482,6 @@ export default function App() {
             <h1 className="font-display text-2xl text-[#012b25] mt-1 leading-none">Order Details</h1>
           </div>
 
-          {/* User Section (Right Panel) */}
           <div className="flex items-center gap-4 self-end sm:self-auto">
             <div className="relative">
               <input type="text" placeholder="Search..." className="pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs w-48 md:w-60 focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" />
@@ -604,8 +501,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* PAGE SCREEN NAVIGATION WRAPPER */}
-        <div className="p-6 md:p-8 space-y-8">
+        <div className="p-6 md:p-8 space-y-8 animate-fade-in">
           {page === 'home' && (
             <HomePage 
               products={products} clips={clips} lockedProducts={lockedProducts} 
@@ -655,10 +551,20 @@ export default function App() {
           {page === 'log' && (
             <ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} />
           )}
+          {page === 'settings' && (
+            <SettingsPage 
+              products={products} 
+              clips={clips} 
+              migrationLog={migrationLog} 
+              onMigrate={handleLegacyMigration} 
+              onExport={() => setShowBackup(true)}
+              onClearAll={() => setConfirmClearDb(true)} 
+            />
+          )}
         </div>
       </main>
 
-      {/* MODALS ENGINE */}
+      {/* CONFIRMATIONS & MODALS */}
       {showAddProduct && <AddProductModal onClose={() => setShowAddProduct(false)} onSave={addProduct} showGateWarning={(data) => setShowGateWarning(data)} showToast={showToast} />}
       {editScoreProductId && <EditScoreModal product={products.find(p => p.id === editScoreProductId)} onClose={() => setEditScoreProductId(null)} onSave={updateProductScore} />}
       {editProductInfoId && <EditProductInfoModal product={products.find(p => p.id === editProductInfoId)} onClose={() => setEditProductInfoId(null)} onSave={async (patch) => { await updateProductInCloud(editProductInfoId, patch); setEditProductInfoId(null); }} />}
@@ -669,24 +575,13 @@ export default function App() {
       {editClipId && <EditClipModal clip={clips.find(c => c.id === editClipId)} products={products} onClose={() => setEditClipId(null)} onSave={async (patch) => { await updateClip(editClipId, patch); setEditClipId(null); }} onDelete={() => setConfirmDeleteClipId(editClipId)} />}
       {makeSimilarClip && <MakeSimilarModal clip={makeSimilarClip} products={products} onClose={() => setMakeSimilarClip(null)} />}
       {showBackup && <BackupModal products={products} clips={clips} onClose={() => setShowBackup(false)} showToast={showToast} />}
-      
-      {showSettings && (
-        <SettingsModal 
-          onClose={() => setShowSettings(false)} 
-          onExport={() => { setShowSettings(false); setShowBackup(true); }} 
-          migrationLog={migrationLog}
-          onMigrate={handleLegacyMigration}
-          onClearAll={() => setConfirmClearDb(true)} 
-        />
-      )}
 
-      {/* ALERT-FREE CUSTOM CONFIRMATION OVERLAYS */}
       {confirmDeleteProdId && (
         <div className="fixed inset-0 bg-[#012b25]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 border border-slate-100">
             <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto"><Trash2 className="w-6 h-6" /></div>
             <h3 className="font-display text-lg text-[#012b25]">ยืนยันการลบสินค้าถาวร?</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">คุณแน่ใจหรือไม่ที่จะทำการลบข้อมูลสินค้าชิ้นนี้? ประวัติและการสั่งวิเคราะห์พอร์ตทั้งหมดจะถูกตัดออกจากสารระบบ</p>
+            <p className="text-xs text-slate-500 leading-relaxed">คุณแน่ใจหรือไม่ที่จะทำการลบข้อมูลสินค้าชิ้นนี้? ประวัติทั้งหมดจะถูกตัดออก</p>
             <div className="flex gap-2 pt-2">
               <button onClick={() => setConfirmDeleteProdId(null)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl font-bold text-xs">ยกเลิก</button>
               <button onClick={() => executeDeleteProduct(confirmDeleteProdId)} className="flex-1 bg-[#012b25] text-white py-2.5 rounded-xl font-bold text-xs">ยืนยันลบ</button>
@@ -713,8 +608,8 @@ export default function App() {
         <div className="fixed inset-0 bg-[#012b25]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 border border-slate-100">
             <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto"><AlertTriangle className="w-6 h-6" /></div>
-            <h3 className="font-display text-lg text-[#012b25]">ล้างทำลายล้างฐานข้อมูลจริงทั้งหมด?</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">คำเตือนวิกฤต: การกระทำนี้จะล้างทำลายข้อมูลสินค้าและสคริปต์คลิปทั้งหมดบนเซิร์ฟเวอร์คลาวด์ Subcollection ของคุณอย่างถาวร!</p>
+            <h3 className="font-display text-lg text-[#012b25]">ล้างฐานข้อมูลทั้งหมด?</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">ข้อมูลทั้งหมดบนคลาวด์จะถูกลบถาวร!</p>
             <div className="flex gap-2 pt-2">
               <button onClick={() => setConfirmClearDb(false)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl font-bold text-xs">ยกเลิก</button>
               <button onClick={executeClearDatabase} className="flex-1 bg-[#012b25] text-white py-2.5 rounded-xl font-bold text-xs">ล้างทั้งหมด</button>
@@ -728,16 +623,15 @@ export default function App() {
           <div className="bg-white rounded-3xl p-6 max-w-md w-full text-center space-y-4 border border-slate-100">
             <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto"><AlertTriangle className="w-6 h-6" /></div>
             <h3 className="font-display text-lg text-[#012b25]">คำเตือน 2-Rules Gate ติ๊กสิทธิ์ไม่ครบ</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">คุณยังไม่ได้ติ๊กสิทธิ์การใช้จริงภายนอก หรือ ขอบข่ายคอนเทนต์ (Scope) ให้ตรงเกณฑ์ช่องหลัก คุณยืนยันที่จะข้ามมาตราการตรวจสอบนี้เพื่อบรรจุสินค้าชิ้นนี้ลงคลังหรือไม่?</p>
+            <p className="text-xs text-slate-500 leading-relaxed">คุณยังไม่ได้ยืนยันว่าใช้จริงหรือตรง Scope ช่อง คุณต้องการบันทึกต่อไปหรือไม่?</p>
             <div className="flex gap-2 pt-2">
-              <button onClick={() => setShowGateWarning(null)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl font-bold text-xs">ย้อนกลับแก้ไข</button>
+              <button onClick={() => setShowGateWarning(null)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl font-bold text-xs">ย้อนกลับ</button>
               <button onClick={() => { addProduct(showGateWarning); setShowGateWarning(null); setShowAddProduct(false); }} className="flex-1 bg-[#012b25] text-white py-2.5 rounded-xl font-bold text-xs">บันทึกต่อไป</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* TOAST PANEL */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 animate-fade-in-up">
           <div className="px-5 py-3 bg-[#012b25] text-[#d9eb54] rounded-2xl shadow-xl text-xs font-bold border border-[#053d34] flex items-center gap-2">
@@ -753,24 +647,6 @@ export default function App() {
 // ============================================================================
 // [ZONE 4] DYNAMIC GRAPHICS & VISUAL CARDS (วิดเจ็ตกราฟแคปซูลมนดึงข้อมูลจริง)
 // ============================================================================
-function OverviewKPI({ icon: Icon, label, value, sub, isPrimary = false }) {
-  return (
-    <div className={`rounded-3xl p-6 shadow-sm flex flex-col justify-between min-h-[140px] transition-all duration-300 hover:scale-[1.01] ${
-      isPrimary ? 'bg-[#012b25] text-white border border-[#033c32]' : 'bg-white text-[#0d2a23] border border-slate-200/60'
-    }`}>
-      <div className="flex justify-between items-start">
-        <span className={`text-[11px] font-bold uppercase tracking-wider ${isPrimary ? 'text-emerald-400/80' : 'text-slate-400'}`}>{label}</span>
-        <div className={`p-2.5 rounded-xl ${isPrimary ? 'bg-[#093c33] text-[#d9eb54]' : 'bg-slate-50 text-slate-400'}`}><Icon className="w-4 h-4" /></div>
-      </div>
-      <div>
-        <div className="font-display text-2xl md:text-3xl tracking-tight leading-none">{value}</div>
-        <div className={`text-[10px] mt-1.5 font-medium ${isPrimary ? 'text-emerald-300/70' : 'text-slate-400'}`}>{sub}</div>
-      </div>
-    </div>
-  );
-}
-
-// Custom Capsule Graph Component (เลียนแบบกราฟสไตล์ Pharmly 1.jpg)
 function CapsuleChart({ data }) {
   const maxValue = Math.max(...data.map(d => d.value), 100);
   return (
@@ -780,14 +656,11 @@ function CapsuleChart({ data }) {
         const isHighlight = item.label === '07'; 
         return (
           <div key={idx} className="flex flex-col items-center flex-1 group relative">
-            {/* Value Tooltip */}
             <div className={`absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-[#012b25] text-white text-[9px] font-mono font-bold px-2 py-1 rounded-md shadow-md z-10 ${
               isHighlight ? 'opacity-100 -top-8' : ''
             }`}>
               ฿{fmtNum(item.value)}
             </div>
-            
-            {/* Capsule Bar */}
             <div className="w-6 md:w-8 bg-[#f3f6f5] rounded-full h-40 flex items-end overflow-hidden border border-slate-100">
               <div 
                 className={`w-full rounded-full transition-all duration-700 ${
@@ -804,7 +677,6 @@ function CapsuleChart({ data }) {
   );
 }
 
-// Heatmap Time Matrix (ดึงช่วงเวลาโพสต์คลิปกลยุทธ์ลงคลิปจริงจากประวัติข้อมูล)
 function HeatmapGrid({ clips }) {
   const days = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   const hours = ['9 am', '10 am', '11 am', '12 pm', '1 pm', '2 pm', '3 pm'];
@@ -818,35 +690,17 @@ function HeatmapGrid({ clips }) {
       const date = new Date(c.postedAt);
       const day = date.getDay(); 
       const hour = date.getHours(); 
-      
       const dayIdxMap = [1, 2, 3, 4, 5, 6, 0]; 
       const dayIdx = dayIdxMap[day];
 
       let hourIdx = -1;
-      if (hour >= 9 && hour <= 15) {
-        hourIdx = hour - 9;
-      }
-      
-      if (dayIdx >= 0 && dayIdx < 7 && hourIdx >= 0 && hourIdx < 7) {
-        grid[hourIdx][dayIdx] += 1;
-      }
+      if (hour >= 9 && hour <= 15) hourIdx = hour - 9;
+      if (dayIdx >= 0 && dayIdx < 7 && hourIdx >= 0 && hourIdx < 7) grid[hourIdx][dayIdx] += 1;
     });
     return grid;
   }, [clips]);
 
-  const maxHeat = useMemo(() => {
-    const flat = heatMapValues.flat();
-    return Math.max(...flat, 1);
-  }, [heatMapValues]);
-
-  const getIntensityClass = (dayIdx, hrIdx) => {
-    const val = heatMapValues[hrIdx][dayIdx];
-    if (val === 0) return 'bg-slate-100';
-    const ratio = val / maxHeat;
-    if (ratio > 0.7) return 'bg-[#0a4d40]';
-    if (ratio > 0.4) return 'bg-[#186a5a]/60';
-    return 'bg-[#186a5a]/25';
-  };
+  const maxHeat = useMemo(() => Math.max(...heatMapValues.flat(), 1), [heatMapValues]);
 
   return (
     <div className="grid grid-cols-8 gap-1.5 text-[9px] text-slate-400 font-bold font-mono">
@@ -855,47 +709,22 @@ function HeatmapGrid({ clips }) {
       {hours.map((h, hrIdx) => (
         <React.Fragment key={h}>
           <div className="text-right pr-2 self-center">{h}</div>
-          {days.map((d, dayIdx) => (
-            <div 
-              key={`${d}-${h}`} 
-              className={`h-4 rounded-[4px] transition-all duration-300 ${getIntensityClass(dayIdx, hrIdx)} hover:scale-110 cursor-pointer`} 
-              title={`สถิติจำนวนโพสต์: ${heatMapValues[hrIdx][dayIdx]} คลิป`} 
-            />
-          ))}
+          {days.map((d, dayIdx) => {
+            const val = heatMapValues[hrIdx][dayIdx];
+            const color = val === 0 ? 'bg-slate-100' : (val / maxHeat > 0.7 ? 'bg-[#0a4d40]' : val / maxHeat > 0.4 ? 'bg-[#186a5a]/60' : 'bg-[#186a5a]/25');
+            return (
+              <div key={`${d}-${h}`} className={`h-4 rounded-[4px] transition-all duration-300 ${color} hover:scale-110 cursor-pointer`} title={`สถิติจำนวนโพสต์: ${val} คลิป`} />
+            );
+          })}
         </React.Fragment>
       ))}
     </div>
   );
 }
 
-// 3V Metrics Progress Bar
-function VBar({ label, value, target, sub, suffix = "" }) {
-  const pct = Math.min(100, Math.round((value / target) * 100));
-  const isGood = value >= target;
-  return (
-    <div className="space-y-1 bg-slate-50 border border-slate-100 p-3.5 rounded-2xl">
-      <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-        <span>{label}</span>
-        {isGood ? <CheckCircle2 className="w-3.5 h-3.5 text-[#1d7c2a]" /> : <Clock className="w-3.5 h-3.5 text-slate-400" />}
-      </div>
-      <div className="font-display text-xl text-[#012b25] mt-0.5">{sub}</div>
-      <div className="w-full h-1.5 bg-slate-200/60 rounded-full overflow-hidden mt-1">
-        <div className={`h-full ${isGood ? 'bg-[#1d7c2a]' : 'bg-[#bcd924]'} transition-all`} style={{ width: `${pct}%` }}></div>
-      </div>
-      <span className="text-[10px] text-slate-400 mt-1 block">เป้าหมาย: {target}{suffix}</span>
-    </div>
-  );
-}
-
 function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, monthlyTarget, onSetMonthlyTarget, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone }) {
   const today = todayStr();
-  const clipsToday = clips.filter(c => c.postedAt?.slice(0, 10) === today);
-  const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
-  const tiktokTotal30d = useMemo(() => {
-    if (!Array.isArray(products)) return 0;
-    return products.reduce((s, p) => s + (Number(p.salesData?.last30d) || Number(p.salesData?.last7d) || 0), 0);
-  }, [products]);
-
+  const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((sum, c) => sum + (Number(c.gmv) || 0), 0);
   const pattern = last7DaysClips.map(c => { if (c.isV) return 'V'; const p = products.find(pp => pp.id === c.productId); return p?.category || '?'; });
   const repeats = []; for (let i = 0; i < pattern.length - 2; i++) { if (pattern[i] && pattern[i] === pattern[i + 1] && pattern[i] === pattern[i + 2]) repeats.push(pattern[i]); }
   const hasRepeatIssue = repeats.length > 0;
@@ -907,94 +736,63 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const uniqueProducts7d = new Set(last7DaysClips.filter(c => !c.isV).map(c => c.productId)).size;
   const avgPerDay = (totalClips7d / 7).toFixed(1);
 
-  // คำนวณหาสินค้าทำเงินสะสมสูงสุดจริงในช่อง Peem6pack จาก clips
   const topSellingProducts = useMemo(() => {
     if (!Array.isArray(products)) return [];
-    const calculated = products.map(p => {
-      const productClips = clips.filter(c => c.productId === p.id);
-      const totalGmv = productClips.reduce((sum, c) => sum + (Number(c.gmv) || 0), 0);
-      return {
-        product: p,
-        gmv: totalGmv,
-        commission: Number(p.scorecard?.commission || 0)
-      };
-    }).filter(p => p.gmv > 0);
-
-    calculated.sort((a, b) => b.gmv - a.gmv);
-    return calculated.slice(0, 3);
+    return products.map(p => ({
+      product: p,
+      gmv: clips.filter(c => c.productId === p.id).reduce((sum, c) => sum + (Number(c.gmv) || 0), 0),
+      commission: Number(p.scorecard?.commission || 0)
+    })).filter(p => p.gmv > 0).sort((a, b) => b.gmv - a.gmv).slice(0, 3);
   }, [products, clips]);
 
-  // ดึงข้อมูลวิเคราะห์จริงพล็อตเป็นเสากราฟจาก Clips รายเดือน
   const salesAnalyticsData = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const monthlyTotals = Array(12).fill(0);
+    const totals = Array(12).fill(0);
     clips.forEach(c => {
       const date = new Date(c.postedAt);
-      if (date.getFullYear() === currentYear) {
-        const month = date.getMonth();
-        monthlyTotals[month] += (Number(c.gmv) || 0);
-      }
+      if (date.getFullYear() === new Date().getFullYear()) totals[date.getMonth()] += (Number(c.gmv) || 0);
     });
-    return Array.from({ length: 12 }, (_, i) => ({
-      label: String(i + 1).padStart(2, '0'),
-      value: monthlyTotals[i]
-    }));
+    return Array.from({ length: 12 }, (_, i) => ({ label: String(i + 1).padStart(2, '0'), value: totals[i] }));
   }, [clips]);
 
   const statsPending = useMemo(() => getStatsPending(clips), [clips]);
   const concentration = useMemo(() => getConcentration(clips, products, 30), [clips, products]);
-  const blended = useMemo(() => getBlendedCommission(products, clips, 30), [products, clips]);
   const clipsThisMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).length;
-
   const winners = useMemo(() => getWinners(clips, products).slice(0, 5), [clips, products]);
   const repostCandidates = useMemo(() => getRepostCandidates(clips, products).slice(0, 3), [clips, products]);
 
   return (
     <div className="space-y-8">
-      {/* 3 CARD METRICS (Pharmly 1.jpg Exact Layout) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <OverviewKPI icon={DollarSign} label="Total Profit (Commission)" value={`฿${fmtNum(totalGMVMonth)}`} sub="สะสมภายในสัปดาห์นี้" isPrimary={true} />
-        <OverviewKPI icon={User} label="Total Customers (Pains)" value={products.length} sub="รายการสินค้าตรึงโฟกัสหลัก" />
-        <OverviewKPI icon={Activity} label="Total Orders (Clips)" value={clips.length} sub="คลิปสะสมทั้งหมดในระบบ" />
+        <OverviewKPI icon={DollarSign} label="Total Profit (Commission)" value={`฿${fmtNum(totalGMVMonth)}`} sub="สะสมภายในเดือนนี้" isPrimary={true} />
+        <OverviewKPI icon={User} label="Total Products" value={products.length} sub="รายการสินค้าคลังทั้งหมด" />
+        <OverviewKPI icon={Activity} label="Total Clips" value={clips.length} sub="คลิปสะสมทั้งหมดในระบบ" />
       </div>
 
-      {/* SALES CHART AREA & TOP MEDICINE GAUGES */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Sales Chart Block (Left) */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm xl:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-display text-lg text-[#012b25]">Sales Analytics</h3>
-              <p className="text-xs text-slate-400">ประเมินสถิติแรงกระตุ้นยอดขายคลิป (รายเดือนปีปัจจุบัน)</p>
+              <p className="text-xs text-slate-400">สถิติยอด GMV คลิป (รายเดือนปีปัจจุบัน)</p>
             </div>
-            <select className="bg-[#f3f6f5] border-none text-xs font-bold px-3 py-2 rounded-xl focus:ring-1 focus:ring-emerald-700">
-              <option>This Year</option>
-            </select>
           </div>
           <CapsuleChart data={salesAnalyticsData} />
         </div>
 
-        {/* Right Gauge Pillars (Top Selling Products) */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5">
-          <h3 className="font-display text-base text-[#012b25] flex items-center justify-between">
-            <span>Top Selling Products</span>
-            <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-1 rounded-md">All Time</span>
-          </h3>
+          <h3 className="font-display text-base text-[#012b25]">Top Selling Products</h3>
           <div className="flex justify-around items-end h-48 pt-4">
             {topSellingProducts.length === 0 ? (
-              <div className="text-center py-12 text-xs text-slate-400 italic w-full">ยังไม่มีสถิติยอด GMV คลิปสำหรับประเมินสัดส่วนพอร์ต</div>
+              <p className="text-xs text-slate-400 italic text-center py-12 w-full">ยังไม่มียอดสะสมในระบบ</p>
             ) : (
               topSellingProducts.map((pData, idx) => {
                 const colors = ['bg-[#f26522]', 'bg-[#0d2a23]', 'bg-[#bcd924]'];
-                const textColors = ['text-white', 'text-white', 'text-[#012b25]'];
-                const scaleHeights = ['h-[85%]', 'h-[65%]', 'h-[45%]'];
+                const hStyles = ['h-[85%]', 'h-[65%]', 'h-[45%]'];
                 return (
                   <div key={pData.product.id} className="flex flex-col items-center flex-1">
                     <div className="w-6 bg-slate-100 rounded-full h-32 flex items-end overflow-hidden">
-                      <div className={`w-full ${colors[idx]} rounded-full ${scaleHeights[idx]} flex items-center justify-center`}>
-                        <span className={`text-[8px] font-bold ${textColors[idx]} rotate-90 whitespace-nowrap`}>
-                          {truncate(pData.product.name, 12)}
-                        </span>
+                      <div className={`w-full ${colors[idx]} rounded-full ${hStyles[idx]} flex items-center justify-center`}>
+                        <span className="text-[8px] font-bold text-white rotate-90 whitespace-nowrap">{truncate(pData.product.name, 12)}</span>
                       </div>
                     </div>
                     <span className="text-[10px] font-bold text-slate-800 font-mono mt-2">฿{fmtNum(pData.gmv)}</span>
@@ -1006,100 +804,41 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       </div>
 
-      {/* 3V METRICS MODULE */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Target className="w-4 h-4 text-emerald-800" /> ตรวจสอบเป้าหมายคุณภาพ หลัก 3V (7 วันล่าสุด)</h3>
-          <span className="text-xs text-slate-400 font-bold">Metrics Tracker</span>
-        </div>
+        <h3 className="font-display text-base text-[#012b25]">🎯เป้าหมายคุณภาพช่อง (7 วันล่าสุด)</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <VBar label="Volume (จำนวนคลิป)" value={totalClips7d} target={21} sub={`${avgPerDay} คลิป/วัน`} />
+          <VBar label="Volume (คลิป)" value={totalClips7d} target={21} sub={`${avgPerDay} คลิป/วัน`} />
           <VBar label="Value (คลิปให้ความรู้)" value={vRatio} target={30} suffix="%" sub={`${vRatio}% V-Clips`} />
-          <VBar label="Variety (ความหลากหลาย)" value={uniqueProducts7d} target={4} sub={`${uniqueProducts7d} แบรนด์สินค้า`} />
+          <VBar label="Variety (แบรนด์สินค้า)" value={uniqueProducts7d} target={4} sub={`${uniqueProducts7d} แบรนด์`} />
         </div>
       </div>
 
-      {/* DANGER CONCENTRATION ALERT */}
       {concentration && concentration.pct >= CONCENTRATION_LIMIT && (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-3xl p-5 flex items-start gap-3 shadow-sm">
           <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
           <div>
-            <h4 className="font-display text-sm">แจ้งเตือนความเสี่ยง: พึ่งพิงยอดขายสินค้าตัวเดียวเกินไป ({concentration.pct}%)</h4>
-            <p className="text-xs text-slate-500 mt-1">สินค้า "{concentration.product?.name}" ครองสัดส่วนพอร์ตส่วนใหญ่เกินเซฟโซนขีดจำกัดสูงสุดที่ {CONCENTRATION_LIMIT}% แนะนำให้เร่งสร้างคลิปปั้นสินค้าตัวสำรองเพื่อกระจายความเสี่ยงยอดนิ่ง</p>
+            <h4 className="font-display text-sm">สัดส่วนพอร์ตเสี่ยงเกินเกณฑ์ ({concentration.pct}%)</h4>
+            <p className="text-xs text-slate-500 mt-1">สินค้า "{concentration.product?.name}" ครองพอร์ตสูงเกินขีดจำกัดที่ {CONCENTRATION_LIMIT}% แนะนำให้เร่งสร้างคลิปสินค้าอื่นเพิ่มเติมเพื่อกระจายสัดส่วนพอร์ต</p>
           </div>
         </div>
       )}
 
-      {/* TRENDING NOW & VISUAL LAYOUTS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Trending Box */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm lg:col-span-2 space-y-4">
-          <h3 className="font-display text-base flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 อันดับสินค้าทำเงินสูงสุดในช่องPeem6pack</h3>
-          <div className="divide-y divide-slate-100">
-            {topSellingProducts.map((t, i) => {
-              const catInfo = getAbcdInfo(t.product?.category);
-              return (
-                <button key={t.product.id} onClick={() => onSelectProduct(t.product.id)} className="w-full py-3.5 flex items-center justify-between text-left hover:bg-slate-50 px-2 rounded-xl transition-all">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="font-display text-slate-400 w-4">#{i+1}</span>
-                    <div className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div>
-                    <div className="min-w-0">
-                      <div className="font-semibold text-sm text-slate-800 truncate">{t.product.name}</div>
-                      <div className="text-[11px] text-slate-400 font-mono">เปอร์เซ็นต์คอมมิชชัน: {t.commission}%</div>
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0 font-mono text-xs font-bold text-slate-800">฿{fmtNum(t.gmv)}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Right: ABCD Pattern Indicator */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-3">
-          <h3 className="font-display text-base flex items-center gap-2"><Zap className="w-4 h-4 text-lime-500" /> Variety ลำดับคำสั่งโพสต์</h3>
-          <div className="flex flex-wrap gap-1.5 py-2">
-            {pattern.length === 0 ? (
-              <div className="text-xs text-slate-400 italic">ยังไม่มีการบันทึกประวัติคลิปสัปดาห์นี้</div>
-            ) : (
-              pattern.map((cat, idx) => {
-                const catInfo = getAbcdInfo(cat);
-                return (
-                  <div key={idx} className={`w-8 h-8 rounded-lg ${catInfo.bg} text-white font-display flex items-center justify-center text-xs shadow-sm`}>{catInfo.short}</div>
-                );
-              })
-            )}
-          </div>
-          {hasRepeatIssue && (
-            <div className="bg-rose-50 text-rose-700 text-[11px] p-2.5 rounded-xl border border-rose-100 flex items-start gap-1.5">
-              <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-              <div>ลงรหัสซ้ำติดต่อกันเกินไป เสี่ยงผู้ติดตามเบื่ออัลกอริทึมจับได้ ควรจัดระเบียบสลับลงแบบฟันปลา</div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* DYNAMIC REPOST & WINNER VAULT MODULES */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Repost Candidates */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-[#7c3aed]" /> ⏱️ ระบบแจ้งเตือนคิวอัปโหลดคลิปทำเงินซ้ำ (Repost)</h3>
-            <span className="text-[10px] bg-purple-50 text-purple-700 font-bold px-2 py-0.5 rounded-md">Repost Schedule</span>
-          </div>
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-[#7c3aed]" /> ⏱️ ระบบคิวแจ้งอัปโหลดคลิปทำเงินซ้ำ (Repost)</h3>
           <div className="space-y-3">
             {repostCandidates.length === 0 ? (
-              <p className="text-xs text-slate-400 italic text-center py-6">ไม่มีประวัติคลิป Winner ดั้งเดิมเข้าเกณฑ์อายุโพสต์ซ้ำ</p>
+              <p className="text-xs text-slate-400 italic text-center py-6">ไม่มีคิวอัปเดตคลิปเก่าทำเงิน</p>
             ) : (
               repostCandidates.map(r => (
-                <div key={r.clip.id} className="p-4 bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs border border-slate-100/50">
+                <div key={r.clip.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0 flex-1">
-                    <div className="font-bold text-slate-800 truncate">{r.clip.hook || 'ไม่มีคำเปิดหัว'}</div>
+                    <div className="font-bold text-slate-800 truncate">{r.clip.hook || 'ไม่มี Hook'}</div>
                     <div className="text-[10px] text-slate-400 font-mono mt-0.5">ยอดวิวสะสม: {fmtNum(r.clip.views7d)} · ยอด GMV เดิม: ฿{fmtNum(r.clip.gmv)}</div>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0">
                     <button onClick={() => onMakeSimilar(r.clip)} className="bg-[#d9eb54] text-[#012b25] font-bold px-3 py-1.5 rounded-lg">ทำซ้ำ</button>
-                    <button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="bg-[#e2f7e4] text-[#1d7c2a] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1">✓ โพสต์แล้ว</button>
+                    <button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="bg-[#e2f7e4] text-[#1d7c2a] font-bold px-3 py-1.5 rounded-lg">✓ โพสต์แล้ว</button>
                   </div>
                 </div>
               ))
@@ -1107,23 +846,19 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           </div>
         </div>
 
-        {/* Winner Vault */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> 🏆 คลังเก็บประวัติคลิปผู้ชนะยอดทะลุเป้า (Winner Vault)</h3>
-            <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-md">Winners</span>
-          </div>
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> 🏆 คลังคลิปทำเงินเด่น (Winner Vault)</h3>
           <div className="space-y-3">
             {winners.length === 0 ? (
-              <p className="text-xs text-slate-400 italic text-center py-6">ยังไม่มียอดคลิปที่สะสมค่า GMV คลาสสิกเกิน ฿1,000</p>
+              <p className="text-xs text-slate-400 italic text-center py-6">ยังไม่พบคลิปยอดสะสมเกิน ฿1,000</p>
             ) : (
               winners.map(w => (
                 <div key={w.clip.id} className="p-3.5 bg-amber-50/50 border border-amber-100 rounded-2xl flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0 flex-1">
                     <div className="font-bold text-slate-800 truncate">{w.clip.hook || 'ไม่มีคำเปิดหัว'}</div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5 font-semibold">สินค้า: {w.product?.name || 'Value Content (V)'}</div>
+                    <div className="text-[10px] text-slate-400 font-semibold font-mono">สินค้า: {w.product?.name || 'V-Content'}</div>
                   </div>
-                  <span className="font-mono font-bold text-amber-700 text-sm flex-shrink-0">฿{fmtNum(w.clip.gmv)}</span>
+                  <span className="font-mono font-bold text-amber-700 text-sm">฿{fmtNum(w.clip.gmv)}</span>
                 </div>
               ))
             )}
@@ -1131,44 +866,35 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       </div>
 
-      {/* REPOST & STALE NOTIFICATIONS (ค้างตรวจสถิติแสดงผลเรียลไทม์ไม่มีหมดอายุจนกว่าจะป้อนข้อมูล!) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Latest Order List (Clips awaiting view updates) */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">Latest Clips (ค้างตรวจสถิติ)</h3><button onClick={() => onGoTo('log')} className="text-xs font-bold text-[#012b25] hover:underline">View All</button></div>
+          <h3 className="font-display text-base text-[#012b25]">Latest Clips (ค้างตรวจสถิติ)</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600">
               <thead><tr className="bg-slate-50 font-bold border-b border-slate-100 text-slate-400"><th className="p-3">Clip Hook</th><th className="p-3">ประเภท</th><th className="p-3">สถานะ</th><th className="p-3 text-right">ดำเนินการ</th></tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {statsPending.pending24h.concat(statsPending.pending7d).length === 0 ? (
-                  <tr>
-                    <td colSpan="4" className="p-6 text-center text-slate-400 italic">🎉 ดำเนินการอัปเดตสถิติครบหมดทุกคลิปแล้ว</td>
-                  </tr>
+                  <tr><td colSpan="4" className="p-6 text-center text-slate-400 italic">🎉 อัปเดตสถิติวิดีโอครบหมดแล้ว</td></tr>
                 ) : (
-                  statsPending.pending24h.map(c => (
-                    <tr key={c.id} className="hover:bg-slate-50/50">
-                      <td className="p-3 truncate max-w-[150px] font-medium text-slate-800">{c.hook || 'ไม่มี Hook'}</td>
-                      <td className="p-3"><span className="text-[10px] bg-sky-50 text-sky-800 px-2 py-0.5 rounded-md font-semibold">24 Hours</span></td>
-                      <td className="p-3"><span className="w-2.5 h-2.5 bg-amber-400 rounded-full inline-block animate-pulse" /></td>
-                      <td className="p-3 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold">อัปเดตวิว</button></td>
-                    </tr>
-                  )).concat(
-                    statsPending.pending7d.map(c => (
+                  statsPending.pending24h.concat(statsPending.pending7d).slice(0, 5).map(c => {
+                    const is7d = hoursSince(c.postedAt) >= 156;
+                    return (
                       <tr key={c.id} className="hover:bg-slate-50/50">
                         <td className="p-3 truncate max-w-[150px] font-medium text-slate-800">{c.hook || 'ไม่มี Hook'}</td>
-                        <td className="p-3"><span className="text-[10px] bg-purple-50 text-[#7c3aed] px-2 py-0.5 rounded-md font-semibold">7 Days</span></td>
-                        <td className="p-3"><span className="w-2.5 h-2.5 bg-purple-400 rounded-full inline-block animate-pulse" /></td>
-                        <td className="p-3 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold">อัปเดตวิว</button></td>
+                        <td className="p-3">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${is7d ? 'bg-purple-50 text-purple-700' : 'bg-sky-50 text-sky-700'}`}>{is7d ? '7 Days' : '24 Hours'}</span>
+                        </td>
+                        <td className="p-3"><span className="w-2.5 h-2.5 bg-amber-400 rounded-full inline-block animate-pulse" /></td>
+                        <td className="p-3 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold">อัปเดตสถิติ</button></td>
                       </tr>
-                    ))
-                  )
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* Lock Focus Status List */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">Focused Products</h3><button onClick={() => onGoTo('lock')} className="text-xs font-bold text-[#012b25] hover:underline">Manage</button></div>
           <div className="space-y-3">
@@ -1203,43 +929,30 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
     if (!Array.isArray(products)) return [];
     let list = products.filter(p => {
       if (search && !p.name?.toLowerCase().includes(search.toLowerCase())) return false;
-      
-      if (filter === 'stale') {
-        return daysSince(p.lastScoredAt) >= RESCORE_DAYS;
-      } else if (filter === 'pick' || filter === 'wait' || filter === 'drop') {
-        return p.decision?.toLowerCase() === filter;
-      } else if (filter === 'locked') {
-        return !!p.locked;
-      } else if (filter !== 'all') {
-        return p.category === filter;
-      }
+      if (filter === 'stale') return daysSince(p.lastScoredAt) >= RESCORE_DAYS;
+      if (filter === 'pick' || filter === 'wait' || filter === 'drop') return p.decision?.toLowerCase() === filter;
+      if (filter === 'locked') return !!p.locked;
+      if (filter !== 'all') return p.category === filter;
       return true;
     });
 
-    // Sorting Logic
-    if (sortBy === 'score') {
-      list.sort((a, b) => (b.scorePct || 0) - (a.scorePct || 0));
-    } else if (sortBy === 'rescore') {
-      list.sort((a, b) => daysSince(b.lastScoredAt) - daysSince(a.lastScoredAt));
-    } else if (sortBy === 'name') {
-      list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
-    } else if (sortBy === 'created') {
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    }
+    if (sortBy === 'score') list.sort((a, b) => (b.scorePct || 0) - (a.scorePct || 0));
+    else if (sortBy === 'rescore') list.sort((a, b) => daysSince(b.lastScoredAt) - daysSince(a.lastScoredAt));
+    else if (sortBy === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
+    else if (sortBy === 'created') list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return list;
   }, [products, search, filter, sortBy]);
 
   return (
     <div className="space-y-6">
-      {/* Product List Overview Header (Pharmly 2.jpg) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between">
           <div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Products</span><div className="font-display text-2xl text-[#012b25] mt-1">{products.length}</div></div>
           <div className="p-3 bg-slate-50 text-slate-400 rounded-2xl"><Package className="w-5 h-5" /></div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between">
-          <div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Low Stock / Stale</span><div className="font-display text-2xl text-amber-600 mt-1">{products.filter(p=>daysSince(p.lastScoredAt) >= RESCORE_DAYS).length}</div></div>
+          <div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Stale Scored</span><div className="font-display text-2xl text-amber-600 mt-1">{products.filter(p=>daysSince(p.lastScoredAt) >= RESCORE_DAYS).length}</div></div>
           <div className="p-3 bg-amber-50 text-amber-500 rounded-2xl"><AlertTriangle className="w-5 h-5" /></div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between">
@@ -1248,15 +961,14 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
         </div>
       </div>
 
-      {/* Advanced Filter Box (Pharmly 2.jpg Table Search Area) */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="relative flex-1">
-            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search for items..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" />
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search for items..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-[#012b25]" />
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1"><Plus className="w-4 h-4" /> Add New Product</button>
+            <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full shadow-sm flex items-center gap-1"><Plus className="w-4 h-4" /> Add New Product</button>
             <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full">
               <option value="all">ทุกพอร์ตสินค้า</option>
               <option value="pick">🟢 PICK Only</option>
@@ -1272,35 +984,31 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
           </div>
         </div>
 
-        {/* Sorting and Grid Toggle bar */}
         <div className="flex items-center justify-between pt-1 border-t border-slate-50 text-slate-500">
           <div className="flex items-center gap-1 text-xs font-bold">
             <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
             <select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="bg-transparent border-none text-xs focus:ring-0 p-0 text-slate-600 font-bold">
-              <option value="score">เรียงตามคะแนนคัดกรอง (สูง-ต่ำ)</option>
+              <option value="score">เรียงตามคะแนน (สูง-ต่ำ)</option>
               <option value="rescore">เรียงตามความ stale (เก่า-ใหม่)</option>
               <option value="name">เรียงตามชื่อสินค้า A-Z</option>
               <option value="created">เรียงตามวันที่เพิ่มล่าสุด</option>
             </select>
-            <span className="text-[10px] text-slate-400 ml-1">พบ {filtered.length} ผลิตภัณฑ์</span>
+            <span className="text-[10px] text-slate-400 font-normal ml-1">พบ {filtered.length} รายการ</span>
           </div>
 
           <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200/50">
-            <button onClick={() => setViewMode('box')} className={`p-1 rounded-md transition-all ${viewMode === 'box' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><LayoutGrid className="w-3.5 h-3.5" /></button>
-            <button onClick={() => setViewMode('list')} className={`p-1 rounded-md transition-all ${viewMode === 'list' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><List className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setViewMode('box')} className={`p-1 rounded-md ${viewMode === 'box' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-650'}`}><LayoutGrid className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setViewMode('list')} className={`p-1 rounded-md ${viewMode === 'list' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-650'}`}><List className="w-3.5 h-3.5" /></button>
           </div>
         </div>
 
-        {/* Render products based on viewMode */}
         {filtered.length === 0 ? (
           <div className="text-center py-12">
-            <Package className="w-12 h-12 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm text-slate-400 italic">ไม่พบสินค้าที่ตรงตามตัวกรองในระบบ</p>
+            <p className="text-sm text-slate-400 italic">ไม่พบสินค้าในระบบ</p>
           </div>
         ) : viewMode === 'box' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 pt-2">
             {filtered.map(p => {
-              const clipCount = clips.filter(c => c.productId === p.id).length;
               const dec = getDecisionInfo(p.decision);
               const catInfo = getAbcdInfo(p.category);
               const isStale = daysSince(p.lastScoredAt) >= RESCORE_DAYS;
@@ -1312,9 +1020,8 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
                       <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
                       {p.isShopAds && <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded-md">🛒 Ads</span>}
                       {p.price > 0 && <span className="text-[9px] bg-slate-100 text-slate-600 font-semibold font-mono px-1.5 py-0.5 rounded-md">฿{fmtNum(p.price)}</span>}
-                      {isStale && <span className="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded-md">Stale</span>}
                     </div>
-                    <h3 className="font-display text-base text-slate-800 line-clamp-2 group-hover:text-emerald-950 transition-colors leading-tight">{p.name || 'ไม่ระบุชื่อ'}</h3>
+                    <h3 className="font-display text-base text-slate-800 line-clamp-2 leading-tight">{p.name || 'ไม่ระบุชื่อ'}</h3>
                     <p className="text-xs text-slate-400 mt-1">{p.brand || 'No brand'}</p>
                   </div>
 
@@ -1336,7 +1043,6 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
                 <tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider">
                   <th className="p-4">Product ID</th>
                   <th className="p-4">Product Name</th>
-                  <th className="p-4">Quantity (Clips)</th>
                   <th className="p-4">Price</th>
                   <th className="p-4">Decision</th>
                   <th className="p-4 text-right">Actions</th>
@@ -1344,7 +1050,6 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map(p => {
-                  const clipCount = clips.filter(c => c.productId === p.id).length;
                   const dec = getDecisionInfo(p.decision);
                   const catInfo = getAbcdInfo(p.category);
                   return (
@@ -1356,7 +1061,6 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
                           <div className="truncate max-w-[200px]"><span className="font-display font-bold text-slate-800 text-sm group-hover:text-emerald-950 block">{p.name || 'ไม่ระบุชื่อ'}</span><span className="text-[10px] text-slate-400">{p.brand || 'No brand'}</span></div>
                         </div>
                       </td>
-                      <td className="p-4 font-mono font-bold text-slate-700">{clipCount} Clips</td>
                       <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
                       <td className="p-4"><span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${dec.bg} ${dec.text}`}>{dec.label}</span></td>
                       <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-[#f3f6f5] hover:bg-[#012b25] hover:text-white px-4 py-2 rounded-full font-bold transition-all">แก้ไขสเปก</button></td>
@@ -1381,8 +1085,7 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
     <div className="space-y-6">
       <button onClick={onBack} className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-800 transition"><ChevronLeft className="w-4 h-4" /> Back to Products</button>
       
-      {/* Premium Dark Glass Frame */}
-      <div className="bg-[#012b25] text-white rounded-3xl p-6 md:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start gap-6 relative overflow-hidden border border-[#043d34]">
+      <div className="bg-[#012b25] text-white rounded-3xl p-6 md:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start gap-6 border border-[#043d34]">
         <div className="space-y-3 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] bg-emerald-900 border border-emerald-800 font-bold px-3 py-1 rounded-md text-emerald-300 uppercase tracking-wider">{typeInfo.emoji} {typeInfo.label}</span>
@@ -1409,7 +1112,6 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
         </div>
       </div>
 
-      {/* Switch Categories & Fast Control Pills */}
       <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Switch Strategy Category:</span>
         <div className="flex gap-1">
@@ -1422,21 +1124,20 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
         </div>
       </div>
 
-      {/* ROI & Attribution Cards Double Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm space-y-2 bg-gradient-to-br from-[#0f5144]/5 to-white">
-          <div className="text-[10px] font-bold text-[#0f5144] uppercase tracking-wider block">📊 อัตรายอดขายจริงจาก TikTok Shop</div>
+          <span className="text-[10px] font-bold text-[#0f5144] uppercase tracking-wider block">📊 อัตรายอดขายจริงจาก TikTok Shop</span>
           {sales30d.hasManual ? (
             <div className="space-y-1 pt-1">
               <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดสะสม 7 วัน:</span><span className="font-mono">฿{fmtNum(sales7d.fromManual)}</span></div>
               <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดสะสม 30 วัน:</span><span className="font-mono">฿{fmtNum(sales30d.fromManual)}</span></div>
             </div>
           ) : (
-            <p className="text-xs text-slate-400 italic py-2">ยังไม่มีประวัติยอดขายป้อนสดแมนนวล กดแก้ไขสิทธิ์ Info เพื่อระบุตัวเลข</p>
+            <p className="text-xs text-slate-400 italic py-2">ยังไม่มีประวัติยอดขาย กดแก้ไขสิทธิ์ Info เพื่อระบุตัวเลข</p>
           )}
         </div>
         <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm space-y-2 bg-gradient-to-br from-blue-50/20 to-white">
-          <div className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block">🎬 ยอดรวมที่แทร็กจากคลิป (Attribution)</div>
+          <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block">🎬 ยอดรวมที่แทร็กจากคลิป (Attribution)</span>
           <div className="space-y-1 pt-1">
             <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดคลิปสะสม 7 วัน:</span><span className="font-mono">฿{fmtNum(sales7d.fromClips)}</span></div>
             <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดคลิปสะสม 30 วัน:</span><span className="font-mono">฿{fmtNum(sales30d.fromClips)}</span></div>
@@ -1444,9 +1145,7 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
         </div>
       </div>
 
-      {/* Pain Bank & Angle Database Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pain Bank */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">😣 Pain Point Bank ({product.pains?.length || 0})</h3><button onClick={onAddPain} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs px-3 py-2 rounded-xl transition-all">+ Add Pain</button></div>
           <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
@@ -1460,7 +1159,6 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
           </div>
         </div>
 
-        {/* Angle Database */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">🎯 Angle Bank มุมคอนเทนต์ ({product.angles?.length || 0})</h3><button onClick={onAddAngle} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs px-3 py-2 rounded-xl transition-all">+ Add Angle</button></div>
           <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
@@ -1488,10 +1186,8 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
         </div>
       </div>
 
-      {/* Interactive Generator Tool (Splitter Block) */}
       <SplitterSection product={product} />
 
-      {/* CLIPS UNDER THIS SPECIFIC PRODUCT */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">🎬 คลิปสะสมที่ผูกกับสินค้านี้ ({clips.length})</h3><button onClick={onAddClip} className="bg-[#bcd924] text-[#0d2a23] font-bold text-xs px-4 py-2.5 rounded-full shadow-sm hover:bg-[#a9c41d] transition-all">+ Add Clip</button></div>
         <div className="space-y-2">
@@ -1544,7 +1240,7 @@ Angle คอนเทนต์: ${selectedAngle ? selectedAngle.text : 'มุ�
 [สูตรผสมสับแถวคลิป (Splitter Combo)]
 กลุ่มเป้าหมาย (Persona): ${persona || 'คนรักสุขภาพทั่วไป'}
 สถานการณ์จริง (Situation): ${situation || 'ชีวิตประจำวัน'}
-อารมณ์นำสายตา (Emotion): ${emotion || 'ต้องการความคุ้มค่าและผลลัพธ์'}
+อารมณ์นำสายตา (Emotion): ${emotion || 'ต้องการความคุค่าและผลลัพธ์'}
 รูปแบบสคริปต์ (Format): ${format || 'รีวิวการใช้งานสไตล์เพื่อนแนะนำ'}
 ${hook ? `\nHook เปิดคลิปบังคับใช้: "${hook}"` : ''}
 ระยะเวลาความยาวคลิป: ${duration} วินาที
@@ -1582,10 +1278,9 @@ ${hook ? `\nHook เปิดคลิปบังคับใช้: "${hook}"`
         <div><label className="text-[10px] uppercase font-bold text-[#bcd924] block mb-1">Format</label><select value={format} onChange={e=>setFormat(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.format.map(fm=><option key={fm} value={fm}>{fm}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">ความยาวสคริปต์ (วิ)</label><input type="number" value={duration} onChange={e=>setDuration(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none font-mono" /></div>
       </div>
-      <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">ประโยค Hook เปิดหัว (Optional)</label><input value={hook} onChange={e=>setHook(e.target.value)} placeholder="เช่น อย่าพึ่งซื้อน้ำมันปลาถ้ายังไม่ได้อ่านหลังกล่อง..." className="w-full text-xs px-4 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none placeholder:text-emerald-700 text-white" /></div>
+      <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">ประโยค Hook เปิดหัว (Optional)</label><input value={hook} onChange={e=>setHook(e.target.value)} placeholder="ใส่ Hook ที่ระบุชัดเจน..." className="w-full text-xs px-4 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none placeholder:text-emerald-700 text-white" /></div>
       <button onClick={handleCopy} className={`w-full text-xs font-bold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-[#bcd924] text-[#0d2a23] hover:bg-[#a9c41d] shadow-md'}`}>{copied ? <><CheckCircle2 className="w-4 h-4" /> ปั้นพรอมต์ส่งเข้าระบบเรียบร้อย วางต่อได้เลย!</> : <><Copy className="w-4 h-4" /> เจนเนอเรต AI Copy Prompt สคริปต์</>}</button>
       
-      {/* RESTORED: Collapsible Prompt details preview container */}
       <details className="mt-3 group"><summary className="text-xs text-emerald-400 font-bold cursor-pointer hover:text-emerald-200 transition-all select-none">▸ คลิกดูข้อความ Prompt ดิบก่อนส่งสิทธิ์</summary><pre className="text-[10px] bg-emerald-950/80 p-4 border border-[#05463a] rounded-2xl mt-3 overflow-x-auto whitespace-pre-wrap text-emerald-100 font-mono leading-relaxed">{generatePrompt()}</pre></details>
     </div>
   );
@@ -1594,7 +1289,6 @@ ${hook ? `\nHook เปิดคลิปบังคับใช้: "${hook}"`
 function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlock, onLockNew }) {
   const monthKey = currentMonth();
 
-  // RESTORED: Categorize lock list into HOT, STEADY, PASSIVE tiers based on category stacks!
   const categorizedLocked = useMemo(() => {
     const result = { HOT: [], STEADY: [], PASSIVE: [] };
     if (!Array.isArray(products) || !Array.isArray(clips)) return result;
@@ -1624,7 +1318,6 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-8 text-center text-slate-400 font-medium shadow-sm">ไม่มีข้อมูลสินค้าที่ตรึงเป้าในเดือนนี้</div>
       ) : (
         <div className="space-y-6">
-          {/* TIER ROWS LOOP */}
           {Object.entries(categorizedLocked).map(([tier, list]) => {
             if (list.length === 0) return null;
             const meta = {
@@ -1642,7 +1335,7 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {list.map(s => {
-                    const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length;
+                    const made = clips.filter(c => c.productId === s.product.id && c.postedAt?.slice(0, 7) === monthKey).length;
                     const target = s.product.locked?.targetClips || s.targetMonth || 1;
                     const pct = Math.min(100, Math.round((made / target) * 100));
                     const catInfo = getAbcdInfo(s.product.category);
@@ -1681,11 +1374,10 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
   );
 }
 
-// RESTORED: Advanced Custom Sorting UI within ClipLogPage & Dynamic List sorting toggle
 function ClipLogPage({ products, clips, onEditClip }) {
   const [search, setSearch] = useState(''); 
   const [period, setPeriod] = useState('30');
-  const [sortOrder, setSortOrder] = useState('desc'); // 'desc' = Newest first, 'asc' = Oldest first
+  const [sortOrder, setSortOrder] = useState('desc'); 
 
   const filtered = useMemo(() => {
     if (!Array.isArray(clips)) return [];
@@ -1705,7 +1397,6 @@ function ClipLogPage({ products, clips, onEditClip }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h3 className="font-display text-base text-[#012b25]">📋 ประวัติ Logs รายชิ้นงาน</h3>
         <div className="flex items-center gap-2">
-          {/* Dynamic Sort Order Toggle Pill */}
           <button 
             onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
             className="flex items-center gap-1.5 text-xs font-bold bg-[#f3f6f5] hover:bg-slate-200 px-3.5 py-2 rounded-xl text-[#012b25] transition-all"
@@ -1721,7 +1412,7 @@ function ClipLogPage({ products, clips, onEditClip }) {
           </div>
         </div>
       </div>
-      <div className="relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clip hook..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
+      <div className="relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clip hook..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-[#012b25]" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
       
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse text-slate-600">
@@ -1732,6 +1423,8 @@ function ClipLogPage({ products, clips, onEditClip }) {
               </th>
               <th className="p-3">สินค้าหลัก</th>
               <th className="p-3">สคริปต์ Hook</th>
+              <th className="p-3">การเงิน (Paid/Pending/Failed)</th>
+              <th className="p-3">Gencode</th>
               <th className="p-3 text-right">Views 7d</th>
               <th className="p-3 text-right">GMV สรุป</th>
             </tr>
@@ -1739,11 +1432,28 @@ function ClipLogPage({ products, clips, onEditClip }) {
           <tbody className="divide-y divide-slate-50">
             {filtered.map(c => {
               const prod = products.find(p=>p.id === c.productId);
+              const payStatus = c.paymentStatus || 'pending';
+              const payMeta = {
+                paid: { label: 'Paid', bg: 'bg-[#e2f7e4] text-[#1d7c2a]' },
+                pending: { label: 'Pending', bg: 'bg-[#fef3c7] text-[#d97706]' },
+                failed: { label: 'Failed', bg: 'bg-[#fee2e2] text-[#dc2626]' }
+              }[payStatus];
+
               return (
                 <tr key={c.id} onClick={() => onEditClip(c.id)} className="hover:bg-slate-50/50 cursor-pointer transition-colors text-slate-700">
                   <td className="p-3 whitespace-nowrap font-mono">{fmtDate(c.postedAt)}</td>
                   <td className="p-3 font-semibold text-slate-900 truncate max-w-[120px]">{c.isV ? '📚 สาระความรู้ (V)' : (prod?.name || '-')}</td>
                   <td className="p-3 truncate max-w-[180px] text-slate-500 font-medium">{c.hook || '-'}</td>
+                  <td className="p-3">
+                    <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${payMeta.bg}`}>{payMeta.label}</span>
+                  </td>
+                  <td className="p-3">
+                    {c.gencodeVerified ? (
+                      <span className="text-[10px] bg-emerald-50 text-[#1d7c2a] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 w-max"><Check className="w-3 h-3" /> Verified</span>
+                    ) : (
+                      <span className="text-[10px] bg-slate-100 text-slate-400 font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 w-max"><Clock className="w-3 h-3" /> Unverified</span>
+                    )}
+                  </td>
                   <td className="p-3 text-right font-mono font-medium">{fmtNum(c.views7d)}</td>
                   <td className="p-3 text-right font-mono font-bold text-emerald-700">฿{fmtNum(c.gmv)}</td>
                 </tr>
@@ -1765,12 +1475,13 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
   const cutoff = Date.now() - days * 86400000;
   const recent = useMemo(() => clips.filter(c => new Date(c.postedAt).getTime() >= cutoff), [clips, cutoff]);
 
-  // Dynamic AOV Calculation (Total GMV / Total Orders from filled clips)
+  const totalClips7d = clips.length || 1;
+
   const statsAOV = useMemo(() => {
     const totalGmv = clips.reduce((sum, c) => sum + (Number(c.gmv) || 0), 0);
     const totalClipsWithSales = clips.filter(c => Number(c.gmv) > 0).length || 1;
-    return Math.round(totalGmv / totalClips7d); // Default fallbacks based on recent activity
-  }, [clips]);
+    return Math.round(totalGmv / totalClipsWithSales); 
+  }, [clips, totalClips7d]);
 
   const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips, days), [products, clips, days]);
 
@@ -1863,14 +1574,12 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
 
   return (
     <div className="space-y-6">
-      {/* RESTORED & PROMOTED: Dynamic Strategic Target Planner Card (เป้าหมายกี่ชิ้น?) */}
       <div className="bg-[#012b25] text-white rounded-3xl p-6 md:p-8 shadow-xl border border-[#043d34] space-y-6">
         <div>
           <h3 className="font-display text-lg text-lime-400 flex items-center gap-2"><Target className="w-5 h-5" /> Strategic Target Planner (คำนวณจำนวนสินค้าพิชิตเป้าหมาย)</h3>
           <p className="text-xs text-emerald-300">ประมวลผลเป้าค่าคอมมิชชันรายเดือน ฿{fmtNum(MONTHLY_REVENUE_TARGET)} เทียบสัดส่วนราคากับ % คอมมิชชันสะสมจริง</p>
         </div>
 
-        {/* Current status bar */}
         <div className="bg-[#033c32] p-5 rounded-2xl border border-[#065345] grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ประมาณการค่าคอมมิชชันปัจจุบัน</span>
@@ -1886,7 +1595,6 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           </div>
         </div>
 
-        {/* Dynamic target breakdown list */}
         <div className="space-y-2.5">
           <span className="text-xs font-bold text-emerald-200 uppercase tracking-wider block">📊 จำนวนชิ้นที่ต้องการขายคนเดียวแยกรายสินค้าเพื่อบรรลุเป้าหมายช่องหลัก:</span>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-1">
@@ -1899,7 +1607,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
                     <span className="font-display text-sm text-white font-bold leading-tight">{i.product.name}</span>
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${getAbcdInfo(i.product.category).bg}`}>{i.product.category}</span>
                   </div>
-                  <div className="flex justify-between items-baseline pt-4 border-t border-[#064239]/60 mt-3 text-xs">
+                  <div className="flex justify-between items-baseline pt-4 border-t border-[#064a3f]/60 mt-3 text-xs">
                     <span className="text-emerald-300 font-medium font-mono">฿{fmtNum(commPerUnit)} คอมมิชชัน/ชิ้น</span>
                     <span className="font-display text-sm text-[#bcd924] font-bold font-mono">ต้องขาย {fmtNum(unitsNeeded)} ชิ้น</span>
                   </div>
@@ -1910,14 +1618,12 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
-      {/* Period Selection Bar */}
       <div className="flex justify-end gap-1.5 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm self-end">
         {['7', '30', '90'].map(d => (
           <button key={d} onClick={() => setPeriod(d)} className={`text-xs font-bold px-4 py-2 rounded-xl border transition-all ${period === d ? 'bg-[#012b25] text-white border-transparent' : 'bg-slate-50 text-slate-500'}`}>{d} วันล่าสุด</button>
         ))}
       </div>
 
-      {/* PORTFOLIO BALANCE MONITOR */}
       {portfolioBalance && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Target className="w-4 h-4 text-emerald-800" /> ตรวจสอบสมดุลสัดส่วนช่อง (Portfolio Balance Target)</h3>
@@ -1946,9 +1652,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       )}
 
-      {/* E-CANDIDATES & PRODUCTS TO CUT ROW */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* E-Candidates */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-purple-600" /> 💎 ตรวจพบสินค้านางฟ้า (E-Candidates)</h3>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">แบรนด์ระดับดาวรุ่งรอขยับหมวดเป็น A</p>
@@ -1977,7 +1681,6 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           </div>
         </div>
 
-        {/* Products to Cut */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><AlertTriangle className="w-4 h-4 text-rose-500" /> ⚠️ เกณฑ์พิจารณาถอดออกจากสิทธิ์พอร์ต (Cut Candidates)</h3>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">แบรนด์ที่ควรหยุดทำคลิปเพื่อเซฟงบแอดสเปน</p>
@@ -2000,9 +1703,7 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
-      {/* CATEGORY & PILLAR BARS ANALYSIS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* ABCD Category GMV breakdown */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25]">🎯 วิเคราะห์สัดส่วนผลงานรายหมวด ABCD ({period}d)</h3>
           <div className="space-y-4">
@@ -2016,10 +1717,10 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
                       <div className={`w-5 h-5 rounded ${info.bg} text-white flex items-center justify-center text-[10px]`}>{k}</div>
                       <span>{info.desc}</span>
                     </div>
-                    <span className="font-mono text-slate-800">฿{fmtNum(s.gmv)} <span className="text-slate-400 font-normal">({s.count} คลิป)</span></span>
+                    <span className="font-mono text-slate-800">฿{fmtNum(s.gmv)} <span className="text-slate-400 font-normal">({s.count} คลิป, เฉลี่ย ฿{fmtNum(s.count > 0 ? Math.round(s.gmv / s.count) : 0)})</span></span>
                   </div>
                   <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${statusColors}`} style={{ width: `${barWidth}%` }}></div>
+                    <div className={`h-full rounded-full ${info.bg}`} style={{ width: `${barWidth}%` }}></div>
                   </div>
                 </div>
               );
@@ -2027,7 +1728,6 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
           </div>
         </div>
 
-        {/* Pillar distribution charts */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25]">📚 อัตราการคุมสัดส่วน Variety ตามเสา Pillar ({period}d)</h3>
           <div className="space-y-4">
@@ -2050,7 +1750,6 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
-      {/* MONTHLY DOUBLE BAR GRID COMPARE */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <h3 className="font-display text-base text-[#012b25]">📅 เปรียบเทียบปริมาณคลิป และ ยอด GMV ตลอด 6 เดือนย้อนหลัง</h3>
         <div className="grid grid-cols-6 gap-3 pt-4">
@@ -2075,7 +1774,6 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
         </div>
       </div>
 
-      {/* ALGORITHMIC RECOMMENDATION LIST */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Lightbulb className="w-4 h-4 text-amber-500" /> 💡 คำแนะนำประมวลผลพอร์ตอัจฉริยะ (Recommendations)</h3>
         <div className="space-y-3">
@@ -2098,6 +1796,143 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
               );
             })
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPage({ products, clips, migrationLog, onMigrate, onExport, onClearAll }) {
+  const [rawJsonInput, setRawJsonInput] = useState('');
+  const [appTheme, setAppTheme] = useState(true);
+  const [appLanguage, setAppLanguage] = useState(true);
+  const [app2FA, setApp2FA] = useState(false);
+  const [pushNotif, setPushNotif] = useState(true);
+
+  const notices = [
+    {
+      title: "📌 แนะนำกลยุทธ์ TikTok SEO ฉบับปี 2026",
+      desc: "เจาะวิธีจับหัวอัลกอริทึมให้วิดีโอมีสิทธิ์แสดงหน้าแรก คัดเน้นการพูด Hook 3 วินาทีแรกควบคู่กับการพิมพ์ซับไตเติ้ลคำค้นหาหลักห้ามขัดเลี่ยง",
+      date: "21 พ.ค. 2569",
+      badge: "SEO Strategy"
+    },
+    {
+      title: "🔥 มาตรการ Variety คุมพอร์ต ABCD ป้องกันช่องปลิว",
+      desc: "สรุปขีดจำกัดความเสี่ยงช่องปลิว กรณีลงรหัสสินค้า A ซ้ำต่อเนื่องมากเกินไป แนะนำให้แทรกคลิป Value Content (V) หรือหมวด C ทราฟิกไดรฟเวอร์สลับแบบฟันปลา",
+      date: "14 พ.ค. 2569",
+      badge: "Variety Rules"
+    },
+    {
+      title: "🛍️ เกณฑ์อัพเกรด Gencode ตะก้าแดงผ่าน TikTok Shop Ads",
+      desc: "ตรวจจับและอัพเดทสถานะ Verified รหัสสินค้าของแคมเปญ เพื่อความโปร่งใสของตัวเลขรายได้หลังบ้านและการจัดทำระบบแทร็กเงินยอด Paid สถิติช่อง",
+      date: "02 พ.ค. 2569",
+      badge: "Advertiser Hub"
+    }
+  ];
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5 lg:col-span-1">
+          <div className="border-b border-slate-100 pb-3">
+            <h3 className="font-display text-base text-[#012b25]">System Configuration</h3>
+            <p className="text-xs text-slate-400 font-medium">เปิด-ปิดมาตรการจัดการแผงควบคุมระบบ</p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-xs font-bold text-[#012b25]">Appearance Mode</div>
+                <p className="text-[10px] text-slate-400">สลับสไตล์แสงสว่างหน้าบ้านอัตโนมัติ</p>
+              </div>
+              <button onClick={() => setAppTheme(!appTheme)}>
+                {appTheme ? <ToggleRight className="w-10 h-10 text-[#012b25]" /> : <ToggleLeft className="w-10 h-10 text-slate-300" />}
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-xs font-bold text-[#012b25]">Thai Language Pack</div>
+                <p className="text-[10px] text-slate-400">แปลเนื้อหาโมดูลและคำแนะนำเป็นภาษาไทย</p>
+              </div>
+              <button onClick={() => setAppLanguage(!appLanguage)}>
+                {appLanguage ? <ToggleRight className="w-10 h-10 text-[#012b25]" /> : <ToggleLeft className="w-10 h-10 text-slate-300" />}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-xs font-bold text-[#012b25]">Two-Factor Auth (2FA)</div>
+                <p className="text-[10px] text-slate-400">เพิ่มความปลอดภัยของสิทธิ์เชื่อมข้อมูลบัญชี</p>
+              </div>
+              <button onClick={() => setApp2FA(!app2FA)}>
+                {app2FA ? <ToggleRight className="w-10 h-10 text-[#012b25]" /> : <ToggleLeft className="w-10 h-10 text-slate-300" />}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-xs font-bold text-[#012b25]">System Push Alerts</div>
+                <p className="text-[10px] text-slate-400">รับสิทธิ์ข้อความเตือนเมื่อคลิปค้างสถิติเกินกำหนด</p>
+              </div>
+              <button onClick={() => setPushNotif(!pushNotif)}>
+                {pushNotif ? <ToggleRight className="w-10 h-10 text-[#012b25]" /> : <ToggleLeft className="w-10 h-10 text-slate-300" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5 lg:col-span-2">
+          <div className="border-b border-slate-100 pb-3">
+            <h3 className="font-display text-base text-[#012b25]">Database & Maintenance</h3>
+            <p className="text-xs text-slate-400 font-medium">เครื่องมือโอนย้ายสิทธิ์และคุมระบบ Firestore</p>
+          </div>
+
+          <div className="space-y-4">
+            <button onClick={onExport} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-left hover:bg-slate-100/50 transition-colors shadow-sm flex items-center justify-between">
+              <div>
+                <div className="font-bold text-sm text-[#012b25]">💾 สร้างจุดสำรองข้อมูลดิจิทัล (Snapshot)</div>
+                <p className="text-[11px] text-slate-400 mt-0.5">ดาวน์โหลดสถิติคลิปและสินค้าเข้าคอมพิวเตอร์เป็นไฟล์ .json</p>
+              </div>
+              <Download className="w-5 h-5 text-slate-400" />
+            </button>
+
+            <div className="bg-amber-50/50 border border-amber-200/60 rounded-2xl p-5 space-y-3">
+              <h4 className="font-display text-xs text-amber-950 flex items-center gap-1.5">🔄 เครื่องมือโอนย้ายสิทธิ์ข้อมูลแอปเวอร์ชันเก่า (v1 {"->"} v2)</h4>
+              <p className="text-[11px] text-amber-900 leading-relaxed font-medium">เทวางรหัสข้อความ JSON ดั้งเดิมที่คุณเซฟจากระบบโมโนลิธตัวเก่าลงช่องด้านล่าง เอนจินย้ายข้อมูลจะทลายขีดจำกัด 1MB ด้วยการสับยิงเซฟแยก Subcollection รายผลิตภัณฑ์ให้ทันทีในคลิกเดียว</p>
+              <textarea value={rawJsonInput} onChange={e=>setRawJsonInput(e.target.value)} placeholder="วางรหัสข้อความสำรองของคุณที่นี่..." rows={3} className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-mono focus:outline-none resize-none" />
+              <button type="button" onClick={() => { if(rawJsonInput.trim()) onMigrate(rawJsonInput.trim()); }} className="w-full bg-[#012b25] hover:bg-[#033c32] text-white font-bold py-3 rounded-2xl text-xs transition-all shadow-md">⚡ เริ่มต้นตรวจสอบความถูกต้องและโอนย้ายเข้า Subcollection</button>
+              {migrationLog && <div className="p-3.5 bg-white border border-amber-200 text-amber-950 font-mono text-[10px] rounded-2xl mt-2 whitespace-pre-wrap leading-normal">{migrationLog}</div>}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">ล้างกระดาน:</span>
+              <button onClick={onClearAll} className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-2xl font-bold text-xs transition-all border border-rose-100">🗑️ ทำลายล้างคลังฐานข้อมูลจริงทั้งหมดถาวร</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 md:p-8 shadow-sm space-y-5">
+        <div>
+          <h3 className="font-display text-lg text-[#012b25] flex items-center gap-1.5"><FileText className="w-5 h-5 text-emerald-800" /> บอร์ดแผนงานยุทธศาสตร์ประจำสัปดาห์ (Notices)</h3>
+          <p className="text-xs text-slate-400 font-medium">บันทึกระเบียบวิธีเล่นและเทรนด์อัลกอริทึม TikTok สะสมเพื่อดึงประสิทธิภาพช่องสูงสุด</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {notices.map((n, idx) => (
+            <div key={idx} className="bg-slate-50 border border-slate-100 rounded-2xl p-5 flex flex-col justify-between hover:scale-[1.01] transition-all">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] bg-emerald-50 text-[#0f5144] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">{n.badge}</span>
+                  <span className="text-[10px] text-slate-400 font-bold font-mono">{n.date}</span>
+                </div>
+                <h4 className="font-display text-[#012b25] text-sm leading-snug">{n.title}</h4>
+                <p className="text-slate-500 text-[11px] leading-relaxed line-clamp-4">{n.desc}</p>
+              </div>
+              <button className="text-[10px] font-bold text-[#012b25] flex items-center gap-1 hover:underline mt-4">อ่านสิทธิ์รายละเอียดฉบับเต็ม →</button>
+            </div>
+          ))}
         </div>
       </div>
     </div>
