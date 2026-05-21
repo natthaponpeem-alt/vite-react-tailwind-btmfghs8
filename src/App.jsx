@@ -112,8 +112,22 @@ const fmtNum = (n) => (n ?? 0).toLocaleString('th-TH');
 const truncate = (s, n) => !s ? '' : s.length > n ? s.slice(0, n) + '…' : s;
 const hoursSince = (iso) => !iso ? 999 : (Date.now() - new Date(iso).getTime()) / 3600000;
 
+// ปลอกดักจับความปลอดภัยตัวแปร (Fallback Safety Guards)
+const getAbcdInfo = (cat) => {
+  return ABCD_INFO[cat] || ABCD_INFO['V'] || { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50' };
+};
+
+const getDecisionInfo = (dec) => {
+  return DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
+};
+
+const getProductTypeInfo = (typeId) => {
+  return PRODUCT_TYPES.find(t => t.id === typeId) || { id: 'other', label: 'อื่นๆ', emoji: '📦' };
+};
+
 function getStatsPending(clips) { 
   const pending24h = [], pending7d = []; 
+  if (!Array.isArray(clips)) return { pending24h, pending7d };
   clips.forEach(c => { 
     const hrs = hoursSince(c.postedAt); 
     if (hrs >= 22 && hrs <= 30 && !c.views24h) pending24h.push(c); 
@@ -155,6 +169,7 @@ function autoClassify({ gmv30d, commission, tiktokRank, price }) {
 
 function getPortfolioBalance(products, clips, days = 30) { 
   const byCat = { A: 0, B: 0, C: 0, D: 0 }; let total = 0; 
+  if (!Array.isArray(products)) return null;
   products.forEach(p => { if (!['A', 'B', 'C', 'D'].includes(p.category)) return; const sales = getProductSales(p, clips, days); byCat[p.category] += sales.primary; total += sales.primary; }); 
   if (total === 0) return null; 
   return Object.fromEntries(Object.entries(byCat).map(([k, v]) => { const actual = Math.round((v / total) * 100); const target = PORTFOLIO_TARGET[k]; const diff = actual - target; return [k, { actual, target, diff, gmv: v, status: Math.abs(diff) <= 5 ? 'ok' : diff > 0 ? 'over' : 'under' }]; })); 
@@ -162,12 +177,14 @@ function getPortfolioBalance(products, clips, days = 30) {
 
 function getBlendedCommission(products, clips, days = 30) { 
   let weightedSum = 0, totalGMV = 0; const breakdown = []; 
+  if (!Array.isArray(products)) return null;
   products.forEach(p => { const sales = getProductSales(p, clips, days); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; breakdown.push({ product: p, gmv: sales.primary, commission: c, contribution: sales.primary * c }); } }); 
   if (totalGMV === 0) return null; 
   return { blended: Math.round((weightedSum / totalGMV) * 100) / 100, target: BLENDED_COMMISSION_TARGET, totalGMV, breakdown }; 
 }
 
 function getCategoryStack(products, clips, category) {
+  if (!Array.isArray(products)) return [];
   const catProducts = products.filter(p => p.category === category);
   const withData = catProducts.map(p => {
     const sales30d = getProductSales(p, clips, 30).primary;
@@ -188,13 +205,14 @@ function getCategoryStack(products, clips, category) {
 }
 
 function getECandidates(products, clips) {
+  if (!Array.isArray(products)) return [];
   return products.map(p => {
     if (p.category === 'A') return null;
     if (daysSince(p.createdAt) < 14) return null;
     const sales30d = getProductSales(p, clips, 30).primary;
     const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length;
     const rank = Number(p.tiktokRank) || 0;
-    const commission = Number(p.scorecard?.commission) || 0;
+    const commission = Number(p.scorecard?.commission || p.scorecard?.commission === 0 ? p.scorecard.commission : 0);
 
     let eScore = 0; const reasons = [];
     if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)} (mass)`); }
@@ -216,9 +234,10 @@ function getECandidates(products, clips) {
 }
 
 function getROIAnalysis(products, clips, monthlyTargetGMV) {
+  if (!Array.isArray(products)) return { items: [], totalCommRevenue: 0, gap: monthlyTargetGMV, pct: 0 };
   const items = products.map(p => {
     const sales30d = getProductSales(p, clips, 30).primary;
-    const commission = Number(p.scorecard?.commission) || 0;
+    const commission = Number(p.scorecard?.commission || p.scorecard?.commission === 0 ? p.scorecard.commission : 0);
     const price = Number(p.price) || 0;
     const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0;
     const currentCommRevenue = sales30d * commission / 100;
@@ -231,8 +250,9 @@ function getROIAnalysis(products, clips, monthlyTargetGMV) {
 }
 
 function getProductsToCut(products, clips) {
+  if (!Array.isArray(products)) return [];
   return products.map(p => {
-    const reasons = []; const commission = Number(p.scorecard?.commission) || 0;
+    const reasons = []; const commission = Number(p.scorecard?.commission || p.scorecard?.commission === 0 ? p.scorecard.commission : 0);
     const sales = getProductSales(p, clips, 30);
     if (commission > 0 && commission <= 5 && sales.primary < 30000) reasons.push(`คอม ${commission}% ≤5%`);
     if (p.scorePct && p.maxScore >= 12 && p.scorePct < WAIT_THRESHOLD) reasons.push(`Argoon ${p.score}/${p.maxScore} = CUT`);
@@ -245,6 +265,7 @@ function getProductsToCut(products, clips) {
 }
 
 function getRevenuePerClip(productId, clips, days = 7) {
+  if (!Array.isArray(clips)) return { revPerClip: 0, totalGMV: 0, clipCount: 0 };
   const cutoff = Date.now() - days * 86400000;
   const pclips = clips.filter(c => c.productId === productId && new Date(c.postedAt).getTime() >= cutoff);
   if (pclips.length === 0) return { revPerClip: 0, totalGMV: 0, clipCount: 0 };
@@ -253,21 +274,48 @@ function getRevenuePerClip(productId, clips, days = 7) {
 }
 
 function getProductSales(product, clips, days) {
+  if (!product) return { fromClips: 0, fromManual: 0, hasManual: false, clipCount: 0, primary: 0 };
   const cutoff = Date.now() - days * 86400000;
-  const fromClips = clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
-  const clipCount = clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).length;
+  const fromClips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).reduce((s, c) => s + (Number(c.gmv) || 0), 0) : 0;
+  const clipCount = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).length : 0;
   const fromManual = days <= 7 ? (Number(product.salesData?.last7d) || 0) : (Number(product.salesData?.last30d) || 0);
   return { fromClips, fromManual, hasManual: fromManual > 0, clipCount, primary: fromManual || fromClips };
 }
 
 function getBestAngle(product, clips) {
-  if (!product?.angles?.length) return null;
+  if (!product?.angles?.length || !Array.isArray(clips)) return null;
   const stats = product.angles.map(angle => {
     const aclips = clips.filter(c => c.angleId === angle.id);
     const totalGMV = aclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0);
     return { angle, count: aclips.length, totalGMV, avg: aclips.length > 0 ? totalGMV / aclips.length : 0 };
   }).filter(s => s.count >= 1).sort((a, b) => b.avg - a.avg);
   return stats[0] || null;
+}
+
+function getWinners(clips, products) {
+  if (!Array.isArray(clips)) return [];
+  return clips.filter(c => (Number(c.gmv) || 0) >= WINNER_GMV).map(c => ({ clip: c, product: Array.isArray(products) ? products.find(p => p.id === c.productId) : null, daysOld: daysSince(c.postedAt) })).sort((a, b) => (Number(b.clip.gmv) || 0) - (Number(a.clip.gmv) || 0));
+}
+
+function getRepostCandidates(clips, products) {
+  return getWinners(clips, products).map(w => {
+    const rs = w.clip.repostStatus || {}; let bucket = null;
+    if (w.daysOld >= 30 && !rs.d30) bucket = 30;
+    else if (w.daysOld >= 14 && !rs.d14) bucket = 14;
+    else if (w.daysOld >= 7 && !rs.d7) bucket = 7;
+    return bucket ? { ...w, repostBucket: bucket } : null;
+  }).filter(Boolean).sort((a, b) => b.repostBucket - a.repostBucket);
+}
+
+function getConcentration(clips, products, days = 30) {
+  const byProduct = {};
+  if (!Array.isArray(products)) return null;
+  products.forEach(p => { const s = getProductSales(p, clips, days); if (s.primary > 0) byProduct[p.id] = s.primary; });
+  const totalGMV = Object.values(byProduct).reduce((s, v) => s + v, 0);
+  if (totalGMV === 0) return null;
+  const sorted = Object.entries(byProduct).sort((a, b) => b[1] - a[1]);
+  if (!sorted || sorted.length === 0) return null;
+  return { pct: Math.round((sorted[0][1] / totalGMV) * 100), product: products.find(p => p.id === sorted[0][0]), totalGMV };
 }
 
 // ============================================================================
@@ -554,9 +602,9 @@ export default function App() {
               }} 
               onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} 
               onAddPain={() => setShowAddPain(true)} 
-              onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: selectedProduct.pains.filter(x => x.id !== painId) })} 
+              onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} 
               onAddAngle={() => setShowAddAngle(true)} 
-              onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: selectedProduct.angles.filter(x => x.id !== angleId) })} 
+              onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} 
               onEditScore={() => setEditScoreProductId(selectedProduct.id)} 
               onEditInfo={() => setEditProductInfoId(selectedProduct.id)} 
               onLock={() => setShowLockProduct(true)} 
@@ -706,7 +754,27 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const today = todayStr();
   const clipsToday = clips.filter(c => c.postedAt?.slice(0, 10) === today);
   const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
-  const tiktokTotal30d = useMemo(() => products.reduce((s, p) => s + (Number(p.salesData?.last30d) || Number(p.salesData?.last7d) || 0), 0), [products]);
+  const tiktokTotal30d = useMemo(() => {
+    if (!Array.isArray(products)) return 0;
+    return products.reduce((s, p) => s + (Number(p.salesData?.last30d) || Number(p.salesData?.last7d) || 0), 0);
+  }, [products]);
+
+  const pattern = last7DaysClips.map(c => { if (c.isV) return 'V'; const p = products.find(pp => pp.id === c.productId); return p?.category || '?'; });
+  const repeats = []; for (let i = 0; i < pattern.length - 2; i++) { if (pattern[i] && pattern[i] === pattern[i + 1] && pattern[i] === pattern[i + 2]) repeats.push(pattern[i]); }
+  const hasRepeatIssue = repeats.length > 0;
+
+  const trendingProducts = useMemo(() => {
+    if (!Array.isArray(products)) return [];
+    return products.map(p => {
+      const sales = getProductSales(p, clips, 7); const stats = getRevenuePerClip(p.id, clips, 7);
+      return { product: p, ...stats, manual7d: sales.fromManual, hasManual: sales.hasManual, primary: sales.primary, isShopAds: !!p.isShopAds };
+    }).filter(s => s.primary > 0).sort((a, b) => b.primary - a.primary).slice(0, 3);
+  }, [products, clips]);
+
+  const statsPending = useMemo(() => getStatsPending(clips), [clips]);
+  const concentration = useMemo(() => getConcentration(clips, products, 30), [clips, products]);
+  const blended = useMemo(() => getBlendedCommission(products, clips, 30), [products, clips]);
+  const clipsThisMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).length;
 
   // จำลองชุดข้อมูลกราฟ 12 เดือน/ช่วง
   const chartData = [
@@ -774,6 +842,55 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       </div>
 
+      {/* TRENDING NOW & VISUAL LAYOUTS */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left: Trending Box */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm lg:col-span-2 space-y-4">
+          <h3 className="font-display text-base flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 อันดับสินค้าทำเงินสูงสุดในช่อง (7d)</h3>
+          <div className="divide-y divide-slate-100">
+            {trendingProducts.map((t, i) => {
+              const catInfo = getAbcdInfo(t.product?.category);
+              return (
+                <button key={t.product.id} onClick={() => onSelectProduct(t.product.id)} className="w-full py-3.5 flex items-center justify-between text-left hover:bg-slate-50 px-2 rounded-xl transition-all">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="font-display text-slate-400 w-4">#{i+1}</span>
+                    <div className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm text-slate-800 truncate">{t.product.name}</div>
+                      <div className="text-[11px] text-slate-400 font-mono">คลิปสะสมสัปดาห์นี้: {t.clipCount} คลิป</div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0 font-mono text-xs font-bold text-slate-800">฿{fmtNum(t.primary)}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right: ABCD Pattern Indicator */}
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-3">
+          <h3 className="font-display text-base flex items-center gap-2"><Zap className="w-4 h-4 text-lime-500" /> Variety ลำดับคำสั่งโพสต์</h3>
+          <div className="flex flex-wrap gap-1.5 py-2">
+            {pattern.length === 0 ? (
+              <div className="text-xs text-slate-400 italic">ยังไม่มีการบันทึกประวัติคลิปสัปดาห์นี้</div>
+            ) : (
+              pattern.map((cat, idx) => {
+                const catInfo = getAbcdInfo(cat);
+                return (
+                  <div key={idx} className={`w-8 h-8 rounded-lg ${catInfo.bg} text-white font-display flex items-center justify-center text-xs shadow-sm`}>{catInfo.short}</div>
+                );
+              })
+            )}
+          </div>
+          {hasRepeatIssue && (
+            <div className="bg-rose-50 text-rose-700 text-[11px] p-2.5 rounded-xl border border-rose-100 flex items-start gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <div>ลงรหัสซ้ำติดต่อกันเกินไป เสี่ยงผู้ติดตามเบื่ออัลกอริทึมจับได้ ควรจัดระเบียบสลับลงแบบฟันปลา</div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* REPOST & STALE NOTIFICATIONS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Latest Order List (Clips awaiting view updates) */}
@@ -803,11 +920,12 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
             {lockedProducts.slice(0, 3).map(p => {
               const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonth()).length;
               const target = p.locked?.targetClips || 1;
+              const catInfo = getAbcdInfo(p.category);
               return (
                 <div key={p.id} onClick={() => onSelectProduct(p.id)} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-100/50 transition-all">
                   <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-lg font-bold text-xs flex items-center justify-center ${ABCD_INFO[p.category].bg} text-white`}>{p.category}</div>
-                    <span className="font-display font-bold text-sm text-slate-800 truncate max-w-[160px]">{p.name}</span>
+                    <div className={`w-8 h-8 rounded-lg font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div>
+                    <span className="font-display font-bold text-sm text-slate-800 truncate max-w-[160px]">{p.name || 'ไม่ระบุชื่อ'}</span>
                   </div>
                   <span className="font-mono text-xs font-bold text-slate-600">{made}/{target} clips</span>
                 </div>
@@ -824,11 +942,12 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all');
 
   const filtered = useMemo(() => {
+    if (!Array.isArray(products)) return [];
     return products.filter(p => {
-      if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !p.name?.toLowerCase().includes(search.toLowerCase())) return false;
       if (filter !== 'all' && p.category !== filter) return false;
       return true;
-    }).sort((a,b) => b.scorePct - a.scorePct);
+    }).sort((a,b) => (b.scorePct || 0) - (a.scorePct || 0));
   }, [products, search, filter]);
 
   return (
@@ -884,19 +1003,20 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
             <tbody className="divide-y divide-slate-50">
               {filtered.map(p => {
                 const clipCount = clips.filter(c => c.productId === p.id).length;
-                const dec = DECISION_INFO[p.decision];
+                const dec = getDecisionInfo(p.decision);
+                const catInfo = getAbcdInfo(p.category);
                 return (
                   <tr key={p.id} className="hover:bg-slate-50/50 group">
                     <td className="p-4 font-mono font-bold text-slate-400">#{p.id.slice(0, 6)}</td>
                     <td className="p-4">
                       <div className="flex items-center gap-3">
-                        <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${ABCD_INFO[p.category].bg} text-white flex-shrink-0`}>{p.category}</div>
-                        <div className="truncate max-w-[200px]"><span className="font-display font-bold text-slate-800 text-sm group-hover:text-emerald-950 block">{p.name}</span><span className="text-[10px] text-slate-400">{p.brand || 'No brand'}</span></div>
+                        <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                        <div className="truncate max-w-[200px]"><span className="font-display font-bold text-slate-800 text-sm group-hover:text-emerald-950 block">{p.name || 'ไม่ระบุชื่อ'}</span><span className="text-[10px] text-slate-400">{p.brand || 'No brand'}</span></div>
                       </div>
                     </td>
                     <td className="p-4 font-mono font-bold text-slate-700">{clipCount} Clips</td>
                     <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
-                    <td className="p-4"><span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${dec?.bg} ${dec?.text}`}>{dec?.label}</span></td>
+                    <td className="p-4"><span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${dec.bg} ${dec.text}`}>{dec.label}</span></td>
                     <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-[#f3f6f5] hover:bg-[#012b25] hover:text-white px-4 py-2 rounded-full font-bold transition-all">แก้ไขสเปก</button></td>
                   </tr>
                 );
@@ -912,6 +1032,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
 function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, onSetCategory, onAddPain, onRemovePain, onAddAngle, onRemoveAngle, onEditScore, onEditInfo, onLock, onUnlock, onDelete, onAddClip, onEditClip }) {
   const sales30d = useMemo(() => getProductSales(product, allClips, 30), [product, allClips]);
   const bestAngle = useMemo(() => getBestAngle(product, allClips), [product, allClips]);
+  const typeInfo = getProductTypeInfo(product?.productType);
   return (
     <div className="space-y-6">
       <button onClick={onBack} className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-800 transition"><ChevronLeft className="w-4 h-4" /> Back to Products</button>
@@ -920,11 +1041,11 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
       <div className="bg-[#012b25] text-white rounded-3xl p-6 md:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start gap-6 relative overflow-hidden border border-[#043d34]">
         <div className="space-y-3 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[10px] bg-emerald-900 border border-emerald-800 font-bold px-3 py-1 rounded-md text-emerald-300 uppercase tracking-wider">{PRODUCT_TYPES.find(t=>t.id===product.productType)?.label}</span>
+            <span className="text-[10px] bg-emerald-900 border border-emerald-800 font-bold px-3 py-1 rounded-md text-emerald-300 uppercase tracking-wider">{typeInfo.emoji} {typeInfo.label}</span>
             {product.isShopAds && <span className="text-[10px] bg-rose-500 text-white font-bold px-3 py-1 rounded-md">🛒 Shop Ads</span>}
             {product.price > 0 && <span className="text-[10px] bg-[#d9eb54] text-[#012b25] font-bold px-3 py-1 rounded-md font-mono">฿{fmtNum(product.price)}</span>}
           </div>
-          <h2 className="font-display text-2xl md:text-3xl tracking-tight leading-tight">{product.name}</h2>
+          <h2 className="font-display text-2xl md:text-3xl tracking-tight leading-tight">{product.name || 'ไม่ระบุชื่อ'}</h2>
           <p className="text-emerald-300 text-xs font-medium">Brand: {product.brand || 'No Brand'}</p>
           <div className="flex gap-2 pt-2">
             {product.tiktokLink && <a href={product.tiktokLink} target="_blank" rel="noreferrer" className="text-xs bg-[#033c32] hover:bg-[#075246] px-3.5 py-2 rounded-xl text-emerald-100 flex items-center gap-1.5 transition-all"><ExternalLink className="w-3.5 h-3.5" /> TikTok Store</a>}
@@ -948,9 +1069,12 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
       <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Switch Strategy Category:</span>
         <div className="flex gap-1">
-          {['A', 'B', 'C', 'D'].map(cat => (
-            <button key={cat} onClick={() => onSetCategory(cat)} className={`text-xs font-bold px-4 py-2 rounded-xl transition-all ${product.category === cat ? `${ABCD_INFO[cat].bg} text-white` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>หมวด {cat}</button>
-          ))}
+          {['A', 'B', 'C', 'D'].map(cat => {
+            const catInfo = getAbcdInfo(cat);
+            return (
+              <button key={cat} onClick={() => onSetCategory(cat)} className={`text-xs font-bold px-4 py-2 rounded-xl transition-all ${product.category === cat ? `${catInfo.bg} text-white` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>หมวด {cat}</button>
+            );
+          })}
         </div>
       </div>
 
@@ -1023,14 +1147,15 @@ function SplitterSection({ product }) {
   const generatePrompt = () => {
     const p = product;
     const selectedPillar = DEFAULT_PILLARS.find(x => x.id === pillarId);
-    const selectedPain = p.pains?.find(x => x.id === painId);
-    const selectedAngle = p.angles?.find(x => x.id === angleId);
+    const selectedPain = (p.pains || []).find(x => x.id === painId);
+    const selectedAngle = (p.angles || []).find(x => x.id === angleId);
+    const catInfo = getAbcdInfo(p.category);
 
     return `เขียนสคริปต์ TikTok Shop สำหรับช่อง PEEM6PACK (Fitness Affiliate Creator)
 
 [สินค้าหลัก]
-ชื่อ: ${p.name} ${p.brand ? `แบรนด์ ${p.brand}` : ''}
-หมวดสินค้า: ${ABCD_INFO[p.category]?.label}
+ชื่อ: ${p.name || 'ไม่ระบุ'} ${p.brand ? `แบรนด์ ${p.brand}` : ''}
+หมวดสินค้า: ${catInfo.label}
 
 [เกณฑ์วิเคราะห์คำสั่งคอนเทนต์]
 Pillar ช่อง: ${selectedPillar ? `${selectedPillar.id} - ${selectedPillar.name} (${selectedPillar.desc})` : 'ตามความเหมาะสม'}
@@ -1070,8 +1195,8 @@ ${hook ? `\nHook เปิดคลิปบังคับใช้: "${hook}"`
       <div><h3 className="font-display text-lg flex items-center gap-2 text-[#bcd924]"><Wand2 className="w-5 h-5" /> ระบบเครื่องปั่นสคริปต์ Splitter Engine v2</h3><p className="text-xs text-emerald-300">กดจับคู่ตัวแปรกวนพอร์ตรหัสคอนเทนต์เพื่อดีด Prompt ป้อนคุยกับ Claude/ChatGPT ได้ทันที</p></div>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Pillar หลัก</label><select value={pillarId} onChange={e=>setPillarId(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{DEFAULT_PILLARS.map(pl=><option key={pl.id} value={pl.id}>{pl.id} - {pl.name}</option>)}</select></div>
-        <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Pain Point</label><select value={painId} onChange={e=>setPainId(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{product.pains?.map(pn=><option key={pn.id} value={pn.id}>{truncate(pn.text, 25)}</option>)}</select></div>
-        <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Angle เล่า</label><select value={angleId} onChange={e=>setAngleId(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{product.angles?.map(an=><option key={an.id} value={an.id}>{truncate(an.text, 25)}</option>)}</select></div>
+        <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Pain Point</label><select value={painId} onChange={e=>setPainId(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{(product.pains || []).map(pn=><option key={pn.id} value={pn.id}>{truncate(pn.text, 25)}</option>)}</select></div>
+        <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Angle เล่า</label><select value={angleId} onChange={e=>setAngleId(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{(product.angles || []).map(an=><option key={an.id} value={an.id}>{truncate(an.text, 25)}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Persona</label><select value={persona} onChange={e=>setPersona(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.persona.map(ps=><option key={ps} value={ps}>{ps}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Situation</label><select value={situation} onChange={e=>setSituation(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.situation.map(st=><option key={st} value={st}>{st}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Emotion</label><select value={emotion} onChange={e=>setEmotion(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.emotion.map(em=><option key={em} value={em}>{em}</option>)}</select></div>
@@ -1101,13 +1226,14 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
             const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length;
             const target = p.locked?.targetClips || 1;
             const pct = Math.min(100, Math.round((made / target) * 100));
+            const catInfo = getAbcdInfo(p.category);
             return (
               <div key={p.id} className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <div className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${ABCD_INFO[p.category].bg} text-white`}>{p.category}</div>
-                      <span className="font-display font-bold text-sm text-[#012b25] truncate max-w-[200px]">{p.name}</span>
+                      <div className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div>
+                      <span className="font-display font-bold text-sm text-[#012b25] truncate max-w-[200px]">{p.name || 'ไม่ระบุชื่อ'}</span>
                     </div>
                     <button onClick={() => onUnlock(p.id)} className="text-slate-300 hover:text-rose-500 p-1">🔓 ปลดล็อก</button>
                   </div>
@@ -1135,6 +1261,7 @@ function ClipLogPage({ products, clips, onEditClip, onMarkRepostDone, onPromoteT
   }, [clips, search, period]);
 
   const roi = useMemo(() => getROIAnalysis(products, clips, MONTHLY_REVENUE_TARGET), [products, clips]);
+  const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -1204,7 +1331,7 @@ function ClipLogPage({ products, clips, onEditClip, onMarkRepostDone, onPromoteT
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">สัดส่วนพอร์ตสินค้าปัจจุบัน:</div>
               {roi.items.slice(0, 5).map(i => (
                 <div key={i.product.id} className="p-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-xs">
-                  <span className="font-semibold text-slate-700 truncate max-w-[150px]">{i.product.name}</span>
+                  <span className="font-semibold text-slate-700 truncate max-w-[150px]">{i.product?.name || 'ไม่ระบุชื่อ'}</span>
                   <span className="font-mono font-bold text-slate-900">฿{fmtNum(Math.round(i.currentCommRevenue))}</span>
                 </div>
               ))}
@@ -1381,7 +1508,6 @@ function SettingsModal({ onClose, onExport, onClearAll, migrationLog, onMigrate 
     <ModalWrapper title="⚙️ แผงตั้งค่าวิศวกรรมระบบบำรุงรักษา" onClose={onClose}>
       <button onClick={onExport} className="w-full p-4 bg-white border border-slate-200 rounded-2xl text-left hover:bg-slate-50 transition-colors shadow-sm"><div className="font-semibold text-sm text-slate-800">💾 สร้างจุด Backup สำรองข้อมูลดิบ</div><p className="text-[11px] text-slate-400 mt-0.5">ดาวน์โหลดไฟล์เก็บเป็นข้อมูล Snapshot ส่วนตัว</p></button>
       
-      {/* MIGRATION MACHINE AREA (กล่องจุดแปลงสิทธิ์อัพเกรดระบบเพื่อหนีพ้น 1MB) */}
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
         <h4 className="font-display text-xs text-amber-950 flex items-center gap-1">🔄 เครื่องมือย้ายรากฐานข้อมูลระบบเก่า (v1 {"->"} v2 คลาวด์แยกแฟ้ม)</h4>
         <p className="text-[11px] text-amber-800 leading-normal">นำข้อความรหัสไฟล์ JSON ทั้งหมดที่คุณกดดึงดาวน์โหลดมาจากแอปตัวเก่า มาเปิดก๊อปปี้เทวางลงช่องกล่องด้านล่างนี้ ระบบตัวใหม่จะทำการสับแยกยิงเก็บเข้าพอร์ต Subcollection ให้ทันที ข้อมูลพอร์ตเดิมไม่สูญหายแน่นอนครับ</p>
