@@ -57,11 +57,11 @@ const DEFAULT_PILLARS = [
 ];
 
 const ABCD_INFO = {
-  A: { label: 'A — ขายดี', short: 'A', desc: 'สินค้าขายดี', bg: 'bg-[#0f5144]', text: 'text-[#0f5144]', border: 'border-emerald-100', lightBg: 'bg-emerald-50' },
-  B: { label: 'B — มาใหม่', short: 'B', desc: 'สินค้าแนะนำ/กำลังมาแรง', bg: 'bg-[#2563eb]', text: 'text-[#2563eb]', border: 'border-blue-100', lightBg: 'bg-blue-50' },
-  C: { label: 'C — ประหยัด', short: 'C', desc: 'สินค้าราคาจับต้องง่าย', bg: 'bg-[#d97706]', text: 'text-[#d97706]', border: 'border-amber-100', lightBg: 'bg-amber-50' },
-  D: { label: 'D — คอมสูง', short: 'D', desc: 'สินค้าไฮเอนด์ค่าคอมหนา', bg: 'bg-[#7c3aed]', text: 'text-[#7c3aed]', border: 'border-purple-100', lightBg: 'bg-purple-50' },
-  V: { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50' },
+  A: { label: 'A — ขายดี', short: 'A', desc: 'สินค้าขายดี', bg: 'bg-[#0f5144]', text: 'text-[#0f5144]', border: 'border-[#0f5144]/10', lightBg: 'bg-emerald-50/50' },
+  B: { label: 'B — มาใหม่', short: 'B', desc: 'สินค้าแนะนำ/กำลังมาแรง', bg: 'bg-[#2563eb]', text: 'text-[#2563eb]', border: 'border-blue-100', lightBg: 'bg-blue-50/50' },
+  C: { label: 'C — ประหยัด', short: 'C', desc: 'สินค้าราคาจับต้องง่าย', bg: 'bg-[#d97706]', text: 'text-[#d97706]', border: 'border-amber-100', lightBg: 'bg-amber-50/50' },
+  D: { label: 'D — คอมสูง', short: 'D', desc: 'สินค้าไฮเอนด์ค่าคอมหนา', bg: 'bg-[#7c3aed]', text: 'text-[#7c3aed]', border: 'border-purple-100', lightBg: 'bg-purple-50/50' },
+  V: { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50/50' },
 };
 
 const DECISION_INFO = { 
@@ -352,6 +352,9 @@ export default function App() {
   const [makeSimilarClip, setMakeSimilarClip] = useState(null);
   const [showBackup, setShowBackup] = useState(false);
 
+  // Custom modal state for 2-rules warning gate
+  const [showGateWarning, setShowGateWarning] = useState(null); 
+
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
   // 1. Firebase Authentication
@@ -603,6 +606,7 @@ export default function App() {
               monthlyTarget={monthlyTarget} onSetMonthlyTarget={(val) => setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings'), { monthlyTarget: val }, { merge: true })} 
               onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} 
               onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)}
+              onMarkRepostDone={markRepostDone}
             />
           )}
           {page === 'products' && (
@@ -639,13 +643,13 @@ export default function App() {
             />
           )}
           {page === 'log' && (
-            <ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />
+            <ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} />
           )}
         </div>
       </main>
 
       {/* MODALS ENGINE */}
-      {showAddProduct && <AddProductModal onClose={() => setShowAddProduct(false)} onSave={addProduct} showToast={showToast} />}
+      {showAddProduct && <AddProductModal onClose={() => setShowAddProduct(false)} onSave={addProduct} showGateWarning={(data) => setShowGateWarning(data)} showToast={showToast} />}
       {editScoreProductId && <EditScoreModal product={products.find(p => p.id === editScoreProductId)} onClose={() => setEditScoreProductId(null)} onSave={updateProductScore} />}
       {editProductInfoId && <EditProductInfoModal product={products.find(p => p.id === editProductInfoId)} onClose={() => setEditProductInfoId(null)} onSave={async (patch) => { await updateProductInCloud(editProductInfoId, patch); setEditProductInfoId(null); }} />}
       {showAddPain && selectedProduct && <AddPainModal onClose={() => setShowAddPain(false)} onSave={async (text, source) => { await updateProductInCloud(selectedProduct.id, { pains: [...(selectedProduct.pains || []), { id: uid(), text, source, createdAt: new Date().toISOString() }] }); setShowAddPain(false); }} />}
@@ -675,7 +679,7 @@ export default function App() {
             <p className="text-xs text-slate-500 leading-relaxed">คุณแน่ใจหรือไม่ที่จะทำการลบข้อมูลสินค้าชิ้นนี้? ประวัติและการสั่งวิเคราะห์พอร์ตทั้งหมดจะถูกตัดออกจากสารระบบ</p>
             <div className="flex gap-2 pt-2">
               <button onClick={() => setConfirmDeleteProdId(null)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl font-bold text-xs">ยกเลิก</button>
-              <button onClick={() => executeDeleteProduct(confirmDeleteProdId)} className="flex-1 bg-rose-600 text-white py-2.5 rounded-xl font-bold text-xs">ยืนยันลบ</button>
+              <button onClick={() => executeDeleteProduct(confirmDeleteProdId)} className="flex-1 bg-[#012b25] text-white py-2.5 rounded-xl font-bold text-xs">ยืนยันลบ</button>
             </div>
           </div>
         </div>
@@ -703,7 +707,21 @@ export default function App() {
             <p className="text-xs text-slate-500 leading-relaxed">คำเตือนวิกฤต: การกระทำนี้จะล้างทำลายข้อมูลสินค้าและสคริปต์คลิปทั้งหมดบนเซิร์ฟเวอร์คลาวด์ Subcollection ของคุณอย่างถาวร!</p>
             <div className="flex gap-2 pt-2">
               <button onClick={() => setConfirmClearDb(false)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl font-bold text-xs">ยกเลิก</button>
-              <button onClick={executeClearDatabase} className="flex-1 bg-rose-600 text-white py-2.5 rounded-xl font-bold text-xs">ล้างทั้งหมด</button>
+              <button onClick={executeClearDatabase} className="flex-1 bg-[#012b25] text-white py-2.5 rounded-xl font-bold text-xs">ล้างทั้งหมด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGateWarning && (
+        <div className="fixed inset-0 bg-[#012b25]/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full text-center space-y-4 border border-slate-100">
+            <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto"><AlertTriangle className="w-6 h-6" /></div>
+            <h3 className="font-display text-lg text-[#012b25]">คำเตือน 2-Rules Gate ติ๊กสิทธิ์ไม่ครบ</h3>
+            <p className="text-xs text-slate-500 leading-relaxed">คุณยังไม่ได้ติ๊กสิทธิ์การใช้จริงภายนอก หรือ ขอบข่ายคอนเทนต์ (Scope) ให้ตรงเกณฑ์ช่องหลัก คุณยืนยันที่จะข้ามมาตราการตรวจสอบนี้เพื่อบรรจุสินค้าชิ้นนี้ลงคลังหรือไม่?</p>
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setShowGateWarning(null)} className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl font-bold text-xs">ย้อนกลับแก้ไข</button>
+              <button onClick={() => { addProduct(showGateWarning); setShowGateWarning(null); setShowAddProduct(false); }} className="flex-1 bg-[#012b25] text-white py-2.5 rounded-xl font-bold text-xs">บันทึกต่อไป</button>
             </div>
           </div>
         </div>
@@ -749,7 +767,7 @@ function CapsuleChart({ data }) {
     <div className="flex justify-between items-end h-56 pt-6 px-2">
       {data.map((item, idx) => {
         const heightPct = Math.round((item.value / maxValue) * 100);
-        const isHighlight = item.label === '07'; // ตะขอปักแบบภาพ 1.jpg
+        const isHighlight = item.label === '07'; 
         return (
           <div key={idx} className="flex flex-col items-center flex-1 group relative">
             {/* Value Tooltip */}
@@ -781,7 +799,6 @@ function HeatmapGrid({ clips }) {
   const days = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   const hours = ['9 am', '10 am', '11 am', '12 pm', '1 pm', '2 pm', '3 pm'];
   
-  // สร้างตารางความหนาแน่นเชิงความร้อนจากคลิปจริง
   const heatMapValues = useMemo(() => {
     const grid = Array(7).fill(0).map(() => Array(7).fill(0));
     if (!Array.isArray(clips)) return grid;
@@ -789,15 +806,12 @@ function HeatmapGrid({ clips }) {
     clips.forEach(c => {
       if (!c.postedAt) return;
       const date = new Date(c.postedAt);
-      const day = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-      const hour = date.getHours(); // 0-23
+      const day = date.getDay(); 
+      const hour = date.getHours(); 
       
-      // แปลง JS Day (0-6) เข้ากับแถว days ของเรา
-      // days = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-      const dayIdxMap = [1, 2, 3, 4, 5, 6, 0]; // Sun maps to index 1, Sat to index 0
+      const dayIdxMap = [1, 2, 3, 4, 5, 6, 0]; 
       const dayIdx = dayIdxMap[day];
 
-      // แปลง Hour เป็นช่วง 9am - 3pm (index 0-6)
       let hourIdx = -1;
       if (hour >= 9 && hour <= 15) {
         hourIdx = hour - 9;
@@ -844,7 +858,26 @@ function HeatmapGrid({ clips }) {
   );
 }
 
-function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, monthlyTarget, onSetMonthlyTarget, onGoTo, onSelectProduct, onEditClip }) {
+// 3V Metrics Progress Bar
+function VBar({ label, value, target, sub, suffix = "" }) {
+  const pct = Math.min(100, Math.round((value / target) * 100));
+  const isGood = value >= target;
+  return (
+    <div className="space-y-1 bg-slate-50 border border-slate-100 p-3.5 rounded-2xl">
+      <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+        <span>{label}</span>
+        {isGood ? <CheckCircle2 className="w-3.5 h-3.5 text-[#1d7c2a]" /> : <Clock className="w-3.5 h-3.5 text-slate-400" />}
+      </div>
+      <div className="font-display text-xl text-[#012b25] mt-0.5">{sub}</div>
+      <div className="w-full h-1.5 bg-slate-200/60 rounded-full overflow-hidden mt-1">
+        <div className={`h-full ${isGood ? 'bg-[#1d7c2a]' : 'bg-[#bcd924]'} transition-all`} style={{ width: `${pct}%` }}></div>
+      </div>
+      <span className="text-[10px] text-slate-400 mt-1 block">เป้าหมาย: {target}{suffix}</span>
+    </div>
+  );
+}
+
+function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, monthlyTarget, onSetMonthlyTarget, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone }) {
   const today = todayStr();
   const clipsToday = clips.filter(c => c.postedAt?.slice(0, 10) === today);
   const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
@@ -856,6 +889,13 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const pattern = last7DaysClips.map(c => { if (c.isV) return 'V'; const p = products.find(pp => pp.id === c.productId); return p?.category || '?'; });
   const repeats = []; for (let i = 0; i < pattern.length - 2; i++) { if (pattern[i] && pattern[i] === pattern[i + 1] && pattern[i] === pattern[i + 2]) repeats.push(pattern[i]); }
   const hasRepeatIssue = repeats.length > 0;
+
+  // 3V Metrics Computations
+  const vCount = last7DaysClips.filter(c => c.isV).length;
+  const totalClips7d = last7DaysClips.length;
+  const vRatio = totalClips7d > 0 ? Math.round((vCount / totalClips7d) * 100) : 0;
+  const uniqueProducts7d = new Set(last7DaysClips.filter(c => !c.isV).map(c => c.productId)).size;
+  const avgPerDay = (totalClips7d / 7).toFixed(1);
 
   // คำนวณหาสินค้าทำเงินสะสมสูงสุดจริงในช่อง Peem6pack จาก clips
   const topSellingProducts = useMemo(() => {
@@ -870,7 +910,6 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
       };
     }).filter(p => p.gmv > 0);
 
-    // เรียงยอดสูงสุดลงล่าง
     calculated.sort((a, b) => b.gmv - a.gmv);
     return calculated.slice(0, 3);
   }, [products, clips]);
@@ -897,6 +936,9 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const blended = useMemo(() => getBlendedCommission(products, clips, 30), [products, clips]);
   const clipsThisMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).length;
 
+  const winners = useMemo(() => getWinners(clips, products).slice(0, 5), [clips, products]);
+  const repostCandidates = useMemo(() => getRepostCandidates(clips, products).slice(0, 3), [clips, products]);
+
   return (
     <div className="space-y-8">
       {/* 3 CARD METRICS (Pharmly 1.jpg Exact Layout) */}
@@ -922,7 +964,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           <CapsuleChart data={salesAnalyticsData} />
         </div>
 
-        {/* Right Gauge Pillars (Top Selling Products - ดึงข้อมูลพอร์ตจริง!) */}
+        {/* Right Gauge Pillars (Top Selling Products) */}
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5">
           <h3 className="font-display text-base text-[#012b25] flex items-center justify-between">
             <span>Top Selling Products</span>
@@ -954,11 +996,35 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       </div>
 
+      {/* 3V METRICS MODULE */}
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Target className="w-4 h-4 text-emerald-800" /> ตรวจสอบเป้าหมายคุณภาพ หลัก 3V (7 วันล่าสุด)</h3>
+          <span className="text-xs text-slate-400 font-bold">Metrics Tracker</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <VBar label="Volume (จำนวนคลิป)" value={totalClips7d} target={21} sub={`${avgPerDay} คลิป/วัน`} />
+          <VBar label="Value (คลิปให้ความรู้)" value={vRatio} target={30} suffix="%" sub={`${vRatio}% V-Clips`} />
+          <VBar label="Variety (ความหลากหลาย)" value={uniqueProducts7d} target={4} sub={`${uniqueProducts7d} แบรนด์สินค้า`} />
+        </div>
+      </div>
+
+      {/* DANGER CONCENTRATION ALERT */}
+      {concentration && concentration.pct >= CONCENTRATION_LIMIT && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-3xl p-5 flex items-start gap-3 shadow-sm">
+          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-display text-sm">แจ้งเตือนความเสี่ยง: พึ่งพิงยอดขายสินค้าตัวเดียวเกินไป ({concentration.pct}%)</h4>
+            <p className="text-xs text-slate-500 mt-1">สินค้า "{concentration.product?.name}" ครองสัดส่วนพอร์ตส่วนใหญ่เกินเซฟโซนขีดจำกัดสูงสุดที่ {CONCENTRATION_LIMIT}% แนะนำให้เร่งสร้างคลิปปั้นสินค้าตัวสำรองเพื่อกระจายความเสี่ยงยอดนิ่ง</p>
+          </div>
+        </div>
+      )}
+
       {/* TRENDING NOW & VISUAL LAYOUTS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Trending Box */}
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm lg:col-span-2 space-y-4">
-          <h3 className="font-display text-base flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 อันดับสินค้าทำเงินสูงสุดในช่อง (สะสมทั้งหมด)</h3>
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm lg:col-span-2 space-y-4">
+          <h3 className="font-display text-base flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 อันดับสินค้าทำเงินสูงสุดในช่องPeem6pack</h3>
           <div className="divide-y divide-slate-100">
             {topSellingProducts.map((t, i) => {
               const catInfo = getAbcdInfo(t.product?.category);
@@ -972,7 +1038,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
                       <div className="text-[11px] text-slate-400 font-mono">เปอร์เซ็นต์คอมมิชชัน: {t.commission}%</div>
                     </div>
                   </div>
-                  <div className="text-right flex-shrink-0 font-mono text-xs font-bold text-[#0f5144]">฿{fmtNum(t.gmv)}</div>
+                  <div className="text-right flex-shrink-0 font-mono text-xs font-bold text-slate-800">฿{fmtNum(t.gmv)}</div>
                 </button>
               );
             })}
@@ -980,7 +1046,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
 
         {/* Right: ABCD Pattern Indicator */}
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-3">
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-3">
           <h3 className="font-display text-base flex items-center gap-2"><Zap className="w-4 h-4 text-lime-500" /> Variety ลำดับคำสั่งโพสต์</h3>
           <div className="flex flex-wrap gap-1.5 py-2">
             {pattern.length === 0 ? (
@@ -1000,6 +1066,58 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
               <div>ลงรหัสซ้ำติดต่อกันเกินไป เสี่ยงผู้ติดตามเบื่ออัลกอริทึมจับได้ ควรจัดระเบียบสลับลงแบบฟันปลา</div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* DYNAMIC REPOST & WINNER VAULT MODULES */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Repost Candidates */}
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-purple-600" /> ⏱️ ระบบแจ้งเตือนคิวอัปโหลดคลิปทำเงินซ้ำ (Repost)</h3>
+            <span className="text-[10px] bg-purple-50 text-purple-700 font-bold px-2 py-0.5 rounded-md">Repost Schedule</span>
+          </div>
+          <div className="space-y-3">
+            {repostCandidates.length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-6">ไม่มีประวัติคลิป Winner ดั้งเดิมเข้าเกณฑ์อายุโพสต์ซ้ำ</p>
+            ) : (
+              repostCandidates.map(r => (
+                <div key={r.clip.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs border border-slate-100/50">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-800 truncate">{r.clip.hook || 'ไม่มีคำเปิดหัว'}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">ยอดวิวสะสม: {fmtNum(r.clip.views7d)} · ยอด GMV เดิม: ฿{fmtNum(r.clip.gmv)}</div>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <button onClick={() => onMakeSimilar(r.clip)} className="bg-[#d9eb54] text-[#012b25] font-bold px-3 py-1.5 rounded-lg">ทำซ้ำ</button>
+                    <button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="bg-[#e2f7e4] text-[#1d7c2a] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1">✓ โพสต์แล้ว</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Winner Vault */}
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> 🏆 คลังเก็บประวัติคลิปผู้ชนะยอดทะลุเป้า (Winner Vault)</h3>
+            <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-md">Winners</span>
+          </div>
+          <div className="space-y-3">
+            {winners.length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-6">ยังไม่มียอดคลิปที่สะสมค่า GMV คลาสสิกเกิน ฿1,000</p>
+            ) : (
+              winners.map(w => (
+                <div key={w.clip.id} className="p-3.5 bg-amber-50/50 border border-amber-100 rounded-2xl flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-800 truncate">{w.clip.hook || 'ไม่มีคำเปิดหัว'}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5 font-semibold">สินค้า: {w.product?.name || 'Value Content (V)'}</div>
+                  </div>
+                  <span className="font-mono font-bold text-amber-700 text-sm flex-shrink-0">฿{fmtNum(w.clip.gmv)}</span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
@@ -1051,16 +1169,41 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 }
 
 function ProductHubPage({ products, clips, onAdd, onSelect }) {
-  const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState(''); 
+  const [filter, setFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('score');
+  const [viewMode, setViewMode] = useState('box');
 
   const filtered = useMemo(() => {
     if (!Array.isArray(products)) return [];
-    return products.filter(p => {
+    let list = products.filter(p => {
       if (search && !p.name?.toLowerCase().includes(search.toLowerCase())) return false;
-      if (filter !== 'all' && p.category !== filter) return false;
+      
+      if (filter === 'stale') {
+        return daysSince(p.lastScoredAt) >= RESCORE_DAYS;
+      } else if (filter === 'pick' || filter === 'wait' || filter === 'drop') {
+        return p.decision?.toLowerCase() === filter;
+      } else if (filter === 'locked') {
+        return !!p.locked;
+      } else if (filter !== 'all') {
+        return p.category === filter;
+      }
       return true;
-    }).sort((a,b) => (b.scorePct || 0) - (a.scorePct || 0));
-  }, [products, search, filter]);
+    });
+
+    // Sorting Logic
+    if (sortBy === 'score') {
+      list.sort((a, b) => (b.scorePct || 0) - (a.scorePct || 0));
+    } else if (sortBy === 'rescore') {
+      list.sort((a, b) => daysSince(b.lastScoredAt) - daysSince(a.lastScoredAt));
+    } else if (sortBy === 'name') {
+      list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
+    } else if (sortBy === 'created') {
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+
+    return list;
+  }, [products, search, filter, sortBy]);
 
   return (
     <div className="space-y-6">
@@ -1075,7 +1218,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
           <div className="p-3 bg-amber-50 text-amber-500 rounded-2xl"><AlertTriangle className="w-5 h-5" /></div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between">
-          <div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Drop Items</span><div className="font-display text-2xl text-rose-600 mt-1">{products.filter(p=>p.decision === 'DROP').length}</div></div>
+          <div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Drop Items</span><div className="font-display text-2xl text-[#dc2626] mt-1">{products.filter(p=>p.decision === 'DROP').length}</div></div>
           <div className="p-3 bg-rose-50 text-rose-500 rounded-2xl"><X className="w-5 h-5" /></div>
         </div>
       </div>
@@ -1091,6 +1234,11 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
             <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1"><Plus className="w-4 h-4" /> Add New Product</button>
             <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full">
               <option value="all">ทุกพอร์ตสินค้า</option>
+              <option value="pick">🟢 PICK Only</option>
+              <option value="wait">🟡 WAIT Only</option>
+              <option value="drop">🔴 DROP Only</option>
+              <option value="locked">🔒 Locked Focus</option>
+              <option value="stale">⏱️ Stale (ค้างคัดกรอง)</option>
               <option value="A">หมวด A (Proven)</option>
               <option value="B">หมวด B (Testing)</option>
               <option value="C">หมวด C (Volume)</option>
@@ -1099,49 +1247,108 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
           </div>
         </div>
 
-        {/* Premium Data Table (Pharmly 2.jpg) */}
-        <div className="overflow-x-auto pt-2">
-          <table className="w-full text-left text-xs text-slate-600 border-collapse">
-            <thead>
-              <tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider">
-                <th className="p-4">Product ID</th>
-                <th className="p-4">Product Name</th>
-                <th className="p-4">Quantity (Clips)</th>
-                <th className="p-4">Price</th>
-                <th className="p-4">Decision</th>
-                <th className="p-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {filtered.map(p => {
-                const clipCount = clips.filter(c => c.productId === p.id).length;
-                const dec = getDecisionInfo(p.decision);
-                const catInfo = getAbcdInfo(p.category);
-                return (
-                  <tr key={p.id} className="hover:bg-slate-50/50 group">
-                    <td className="p-4 font-mono font-bold text-slate-400">#{p.id.slice(0, 6)}</td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
-                        <div className="truncate max-w-[200px]"><span className="font-display font-bold text-slate-800 text-sm group-hover:text-emerald-950 block">{p.name || 'ไม่ระบุชื่อ'}</span><span className="text-[10px] text-slate-400">{p.brand || 'No brand'}</span></div>
-                      </div>
-                    </td>
-                    <td className="p-4 font-mono font-bold text-slate-700">{clipCount} Clips</td>
-                    <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
-                    <td className="p-4"><span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${dec.bg} ${dec.text}`}>{dec.label}</span></td>
-                    <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-[#f3f6f5] hover:bg-[#012b25] hover:text-white px-4 py-2 rounded-full font-bold transition-all">แก้ไขสเปก</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        {/* Sorting and Grid Toggle bar */}
+        <div className="flex items-center justify-between pt-1 border-t border-slate-50 text-slate-500">
+          <div className="flex items-center gap-1 text-xs font-bold">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+            <select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="bg-transparent border-none text-xs focus:ring-0 p-0 text-slate-600 font-bold">
+              <option value="score">เรียงตามคะแนนคัดกรอง (สูง-ต่ำ)</option>
+              <option value="rescore">เรียงตามความ stale (เก่า-ใหม่)</option>
+              <option value="name">เรียงตามชื่อสินค้า A-Z</option>
+              <option value="created">เรียงตามวันที่เพิ่มล่าสุด</option>
+            </select>
+            <span className="text-[10px] text-slate-400 font-normal pl-2 border-l border-slate-200">พบ {filtered.length} ผลิตภัณฑ์</span>
+          </div>
+
+          <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200/50">
+            <button onClick={() => setViewMode('box')} className={`p-1 rounded-md transition-all ${viewMode === 'box' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><LayoutGrid className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setViewMode('list')} className={`p-1 rounded-md transition-all ${viewMode === 'list' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><List className="w-3.5 h-3.5" /></button>
+          </div>
         </div>
+
+        {/* Render products based on viewMode */}
+        {filtered.length === 0 ? (
+          <div className="text-center py-12">
+            <Package className="w-12 h-12 text-slate-300 mx-auto mb-2" />
+            <p className="text-sm text-slate-400 italic">ไม่พบสินค้าที่ตรงตามตัวกรองในระบบ</p>
+          </div>
+        ) : viewMode === 'box' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 pt-2">
+            {filtered.map(p => {
+              const clipCount = clips.filter(c => c.productId === p.id).length;
+              const dec = getDecisionInfo(p.decision);
+              const catInfo = getAbcdInfo(p.category);
+              const isStale = daysSince(p.lastScoredAt) >= RESCORE_DAYS;
+              return (
+                <div key={p.id} onClick={() => onSelect(p.id)} className={`bg-white border ${isStale ? 'border-amber-300 shadow-sm shadow-amber-50' : 'border-slate-100'} rounded-3xl p-5 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between relative group`}>
+                  {p.locked && <div className="absolute top-4 right-4 text-[#012b25] bg-lime-400/20 p-1.5 rounded-full border border-lime-400/20"><Lock className="w-3.5 h-3.5" /></div>}
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                      <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                      {p.isShopAds && <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded-md">🛒 Ads</span>}
+                      {p.price > 0 && <span className="text-[9px] bg-slate-100 text-slate-600 font-semibold font-mono px-1.5 py-0.5 rounded-md">฿{fmtNum(p.price)}</span>}
+                      {isStale && <span className="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded-md">Stale</span>}
+                    </div>
+                    <h3 className="font-display text-base text-slate-800 line-clamp-2 group-hover:text-emerald-950 transition-colors leading-tight">{p.name || 'ไม่ระบุชื่อ'}</h3>
+                    <p className="text-xs text-slate-400 mt-1">{p.brand || 'No brand'}</p>
+                  </div>
+
+                  <div className="mt-5 pt-4 border-t border-slate-50 flex items-end justify-between">
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Argoon Score</div>
+                      <div className="font-mono font-bold text-sm text-slate-800 mt-0.5">{p.score}/{p.maxScore} <span className="text-xs text-slate-400 font-normal">({p.scorePct}%)</span></div>
+                    </div>
+                    <div className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${dec.bg} ${dec.text}`}>{dec.label}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="overflow-x-auto pt-2">
+            <table className="w-full text-left text-xs text-slate-600 border-collapse">
+              <thead>
+                <tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider">
+                  <th className="p-4">Product ID</th>
+                  <th className="p-4">Product Name</th>
+                  <th className="p-4">Quantity (Clips)</th>
+                  <th className="p-4">Price</th>
+                  <th className="p-4">Decision</th>
+                  <th className="p-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filtered.map(p => {
+                  const clipCount = clips.filter(c => c.productId === p.id).length;
+                  const dec = getDecisionInfo(p.decision);
+                  const catInfo = getAbcdInfo(p.category);
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50/50 group">
+                      <td className="p-4 font-mono font-bold text-slate-400">#{p.id.slice(0, 6)}</td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                          <div className="truncate max-w-[200px]"><span className="font-display font-bold text-slate-800 text-sm group-hover:text-emerald-950 block">{p.name || 'ไม่ระบุชื่อ'}</span><span className="text-[10px] text-slate-400">{p.brand || 'No brand'}</span></div>
+                        </div>
+                      </td>
+                      <td className="p-4 font-mono font-bold text-slate-700">{clipCount} Clips</td>
+                      <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
+                      <td className="p-4"><span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${dec.bg} ${dec.text}`}>{dec.label}</span></td>
+                      <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-[#f3f6f5] hover:bg-[#012b25] hover:text-white px-4 py-2 rounded-full font-bold transition-all">แก้ไขสเปก</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, onSetCategory, onAddPain, onRemovePain, onAddAngle, onRemoveAngle, onEditScore, onEditInfo, onLock, onUnlock, onDelete, onAddClip, onEditClip }) {
+  const sales7d = useMemo(() => getProductSales(product, allClips, 7), [product, allClips]);
   const sales30d = useMemo(() => getProductSales(product, allClips, 30), [product, allClips]);
   const bestAngle = useMemo(() => getBestAngle(product, allClips), [product, allClips]);
   const typeInfo = getProductTypeInfo(product?.productType);
@@ -1190,6 +1397,28 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
         </div>
       </div>
 
+      {/* ROI & Attribution Cards Double Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm space-y-2 bg-gradient-to-br from-[#0f5144]/5 to-white">
+          <div className="text-[10px] font-bold text-[#0f5144] uppercase tracking-wider block">📊 อัตรายอดขายจริงจาก TikTok Shop</div>
+          {sales30d.hasManual ? (
+            <div className="space-y-1 pt-1">
+              <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดสะสม 7 วัน:</span><span className="font-mono">฿{fmtNum(sales7d.fromManual)}</span></div>
+              <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดสะสม 30 วัน:</span><span className="font-mono">฿{fmtNum(sales30d.fromManual)}</span></div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 italic py-2">ยังไม่มีประวัติยอดขายป้อนสดแมนนวล กดแก้ไขสิทธิ์ Info เพื่อระบุตัวเลข</p>
+          )}
+        </div>
+        <div className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm space-y-2 bg-gradient-to-br from-blue-50/20 to-white">
+          <div className="text-[10px] font-bold text-blue-800 uppercase tracking-wider block">🎬 ยอดรวมที่แทร็กจากคลิป (Attribution)</div>
+          <div className="space-y-1 pt-1">
+            <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดคลิปสะสม 7 วัน:</span><span className="font-mono">฿{fmtNum(sales7d.fromClips)}</span></div>
+            <div className="flex justify-between text-xs font-bold text-slate-700"><span>ยอดคลิปสะสม 30 วัน:</span><span className="font-mono">฿{fmtNum(sales30d.fromClips)}</span></div>
+          </div>
+        </div>
+      </div>
+
       {/* Pain Bank & Angle Database Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Pain Bank */}
@@ -1210,12 +1439,25 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">🎯 Angle Bank มุมคอนเทนต์ ({product.angles?.length || 0})</h3><button onClick={onAddAngle} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs px-3 py-2 rounded-xl transition-all">+ Add Angle</button></div>
           <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+            {bestAngle && bestAngle.count > 0 && (
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 relative shadow-inner">
+                <div className="p-2.5 bg-[#bcd924] text-[#012b25] rounded-xl flex-shrink-0 shadow-sm"><Trophy className="w-5 h-5" /></div>
+                <div className="space-y-0.5">
+                  <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wide block">🏆 Angle ที่ดีที่สุด (Best Angle)</span>
+                  <p className="text-sm font-bold text-[#012b25]">{bestAngle.angle.text}</p>
+                  <p className="text-[11px] text-slate-500 font-mono mt-1 font-semibold">เฉลี่ย ฿{fmtNum(Math.round(bestAngle.avg))}/คลิป · ปั่นยอดสะสม ฿{fmtNum(bestAngle.totalGMV)} จาก {bestAngle.count} คลิป</p>
+                </div>
+              </div>
+            )}
             {(!product.angles || product.angles.length === 0) ? (
               <p className="text-xs text-slate-400 italic text-center py-6">ยังไม่มียอดคลังปัญญา Angle นำสายตา</p>
             ) : (
-              product.angles.map(a => (
-                <div key={a.id} className="p-3 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between gap-2 text-xs"><p className="text-slate-700 font-medium">{a.text}</p><button onClick={() => onRemoveAngle(a.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 className="w-3.5 h-3.5" /></button></div>
-              ))
+              product.angles.map(a => {
+                const isBest = bestAngle && bestAngle.angle.id === a.id;
+                return (
+                  <div key={a.id} className={`p-3 rounded-2xl flex items-center justify-between gap-2 text-xs border ${isBest ? 'bg-amber-50/30 border-amber-200/50' : 'bg-slate-50 border-slate-100'}`}><p className="text-slate-700 font-medium">{isBest && '🏆 '}{a.text}</p><button onClick={() => onRemoveAngle(a.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 className="w-3.5 h-3.5" /></button></div>
+                );
+              })
             )}
           </div>
         </div>
@@ -1284,7 +1526,7 @@ ${hook ? `\nHook เปิดคลิปบังคับใช้: "${hook}"`
 
 [เงื่อนไขการเขียนและสไตล์ช่อง]
 - พูดคุยสไตล์เพื่อนแนะนำเพื่อน ตบมุกด้วยความเป็นกันเอง ไม่วิชาการจ๋าเกินไป
-- ตัวตนของภีม: ชายอายุ 31 ปี ฟิตเนสอินฟลูเอนเซอร์ในไทย หุ่นดี ออกกำลังกายจริง ใช้จริง
+- ตัวตนของ ภีม: ชายอายุ 31 ปี ฟิตเนสอินฟลูเอนเซอร์ในไทย หุ่นดี ออกกำลังกายจริง ใช้จริง
 - โครงสร้าง: Hook 3 วินาทีแรก -> เปิดประเด็นความเจ็บปวด -> นำเสนอผลลัพธ์ของสินค้า -> CTA (Soft Sell ตะกร้าเหลือง)
 - ไม่ฮาร์ดเซลล์ ไม่เคลมสรรพคุณเกินจริง เน้น Value ก่อนขายเสมอ
 
@@ -1310,60 +1552,115 @@ ${hook ? `\nHook เปิดคลิปบังคับใช้: "${hook}"`
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Pain Point</label><select value={painId} onChange={e=>setPainId(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{(product.pains || []).map(pn=><option key={pn.id} value={pn.id}>{truncate(pn.text, 25)}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Angle เล่า</label><select value={angleId} onChange={e=>setAngleId(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{(product.angles || []).map(an=><option key={an.id} value={an.id}>{truncate(an.text, 25)}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Persona</label><select value={persona} onChange={e=>setPersona(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.persona.map(ps=><option key={ps} value={ps}>{ps}</option>)}</select></div>
-        <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Situation</label><select value={situation} onChange={e=>setSituation(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.situation.map(st=><option key={st} value={st}>{st}</option>)}</select></div>
+        <div><label className="text-[10px] uppercase font-bold text-[#bcd924] block mb-1">Situation</label><select value={situation} onChange={e=>setSituation(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.situation.map(st=><option key={st} value={st}>{st}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Emotion</label><select value={emotion} onChange={e=>setEmotion(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.emotion.map(em=><option key={em} value={em}>{em}</option>)}</select></div>
-        <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">Format</label><select value={format} onChange={e=>setFormat(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.format.map(fm=><option key={fm} value={fm}>{fm}</option>)}</select></div>
+        <div><label className="text-[10px] uppercase font-bold text-[#bcd924] block mb-1">Format</label><select value={format} onChange={e=>setFormat(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none">{<option value="">-- เลือก --</option>}{SPLITTER_OPTIONS.format.map(fm=><option key={fm} value={fm}>{fm}</option>)}</select></div>
         <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">ความยาวสคริปต์ (วิ)</label><input type="number" value={duration} onChange={e=>setDuration(e.target.value)} className="w-full px-3 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none font-mono" /></div>
       </div>
-      <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">ประโยค Hook เปิดหัว (Optional)</label><input value={hook} onChange={e=>setHook(e.target.value)} placeholder="เช่น อย่าพึ่งซื้อน้ำมันปลาถ้ายังไม่ได้อ่านหลังกล่อง..." className="w-full text-xs px-4 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none placeholder:text-emerald-700 text-white" /></div>
-      <button onClick={handleCopy} className={`w-full text-xs font-bold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-[#bcd924] text-[#0d2a23] hover:bg-[#a9c41d] shadow-md'}`}>{copied ? <><CheckCircle2 className="w-4 h-4" /> ปั้นพรอมต์ส่งเข้าระบบเรียบร้อย วางต่อได้เลย!</> : <><Copy className="w-4 h-4" /> เจนเนอเรต AI Copy Prompt สคริปต์</>}</button>
+      <div><label className="text-[10px] uppercase font-bold text-emerald-300 block mb-1">ประโยค Hook เปิดหัว (Optional)</label><input value={hook} onChange={e=>setHook(e.target.value)} placeholder="ใส่ Hook ที่ระบุชัดเจน..." className="w-full text-xs px-4 py-2.5 bg-[#033c32] border border-[#075246] rounded-xl focus:outline-none placeholder:text-emerald-700 text-white" /></div>
+      <button onClick={handleCopy} className={`w-full text-xs font-bold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 ${copied ? 'bg-[#0f5144] text-white' : 'bg-[#bcd924] text-[#012b25] hover:bg-[#a9c41d] shadow-md'}`}>{copied ? <><CheckCircle2 className="w-4 h-4" /> ปั้นพรอมต์ส่งเข้าระบบเรียบร้อย วางต่อได้เลย!</> : <><Copy className="w-4 h-4" /> เจนเนอเรต AI Copy Prompt สคริปต์</>}</button>
+      
+      {/* RESTORED: Collapsible Prompt details preview container */}
+      <details className="mt-3 group"><summary className="text-xs text-emerald-400 font-bold cursor-pointer hover:text-emerald-200 transition-all select-none">▸ คลิกดูข้อความ Prompt ดิบก่อนส่งสิทธิ์</summary><pre className="text-[10px] bg-emerald-950/80 p-4 border border-[#05463a] rounded-2xl mt-3 overflow-x-auto whitespace-pre-wrap text-emerald-100 font-mono leading-relaxed">{generatePrompt()}</pre></details>
     </div>
   );
 }
 
 function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlock, onLockNew }) {
   const monthKey = currentMonth();
+
+  // RESTORED: Categorize lock list into HOT, STEADY, PASSIVE tiers based on category stacks!
+  const categorizedLocked = useMemo(() => {
+    const result = { HOT: [], STEADY: [], PASSIVE: [] };
+    if (!Array.isArray(products) || !Array.isArray(clips)) return result;
+
+    ['A', 'B', 'C', 'D'].forEach(cat => {
+      const fullStack = getCategoryStack(products, clips, cat);
+      const lockedIds = new Set(lockedProducts.filter(p => p.category === cat).map(p => p.id));
+      const filteredStack = fullStack.filter(s => lockedIds.has(s.product.id));
+      
+      filteredStack.forEach(s => {
+        if (s.tier === 'HOT') result.HOT.push(s);
+        else if (s.tier === 'STEADY') result.STEADY.push(s);
+        else result.PASSIVE.push(s);
+      });
+    });
+    return result;
+  }, [products, clips, lockedProducts]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h2 className="font-display text-xl text-slate-800">เป้าหมายยุทธศาสตร์ Lock List เดือนนี้</h2><p className="text-xs text-slate-400">ควบคุมปริมาณ Content Variety ตามกรอบ HOT / STEADY / PASSIVE</p></div>
+        <div><h2 className="font-display text-xl text-slate-800">เป้าหมายยุทธศาสตร์ Lock List เดือนนี้</h2><p className="text-xs text-slate-400">ควบคุมสัดส่วน Content Frequency (HOT / STEADY / PASSIVE)</p></div>
         <button onClick={onLockNew} className="bg-[#012b25] text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-sm">+ ล็อกเป้าหมายเพิ่ม</button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {lockedProducts.length === 0 ? (
-          <div className="bg-white border border-[#e9eceb] rounded-3xl p-8 text-center text-slate-400 font-medium md:col-span-2 shadow-sm">ไม่มีข้อมูลสินค้าที่ตรึงเป้าในเดือนนี้</div>
-        ) : (
-          lockedProducts.map(p => {
-            const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === monthKey).length;
-            const target = p.locked?.targetClips || 1;
-            const pct = Math.min(100, Math.round((made / target) * 100));
-            const catInfo = getAbcdInfo(p.category);
+      {lockedProducts.length === 0 ? (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-8 text-center text-slate-400 font-medium shadow-sm">ไม่มีข้อมูลสินค้าที่ตรึงเป้าในเดือนนี้</div>
+      ) : (
+        <div className="space-y-6">
+          {/* TIER ROWS LOOP */}
+          {Object.entries(categorizedLocked).map(([tier, list]) => {
+            if (list.length === 0) return null;
+            const meta = {
+              HOT: { label: '🔥 HOT STACK (เป้าหมาย 3-4 คลิป/สัปดาห์)', color: 'text-rose-600', bg: 'bg-rose-50' },
+              STEADY: { label: '⚡ STEADY STACK (เป้าหมาย 1-2 คลิป/สัปดาห์)', color: 'text-[#2563eb]', bg: 'bg-blue-50' },
+              PASSIVE: { label: '💤 PASSIVE STACK (เป้าหมาย 2-3 คลิป/เดือน)', color: 'text-slate-600', bg: 'bg-slate-50' }
+            }[tier];
+
             return (
-              <div key={p.id} className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div>
-                      <span className="font-display font-bold text-sm text-[#012b25] truncate max-w-[200px]">{p.name || 'ไม่ระบุชื่อ'}</span>
-                    </div>
-                    <button onClick={() => onUnlock(p.id)} className="text-slate-300 hover:text-rose-500 p-1">🔓 ปลดล็อก</button>
-                  </div>
-                  <div className="flex items-center justify-between text-xs font-mono font-bold text-slate-500 mb-1"><span>ความคืบหน้าการลงคลิป:</span><span>{made} / {target} คลิป</span></div>
-                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200/40"><div className="h-full bg-[#bcd924] rounded-full transition-all duration-300" style={{ width: `${pct}%` }}></div></div>
+              <div key={tier} className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm space-y-4">
+                <div className={`p-3 rounded-2xl flex items-center justify-between font-bold text-xs ${meta.bg} ${meta.color}`}>
+                  <span>{meta.label}</span>
+                  <span className="font-mono">{list.length} แบรนด์</span>
                 </div>
-                <button onClick={() => onSelectProduct(p.id)} className="w-full bg-slate-50 text-slate-700 text-xs font-bold py-2.5 rounded-xl border border-slate-100 hover:bg-slate-100 transition-colors">เปิดดูคลังข้อมูลและสคริปต์ Splitter →</button>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {list.map(s => {
+                    const made = clips.filter(c => c.productId === s.product.id && c.postedAt?.slice(0, 7) === monthKey).length;
+                    const target = s.product.locked?.targetClips || s.targetMonth || 1;
+                    const pct = Math.min(100, Math.round((made / target) * 100));
+                    const catInfo = getAbcdInfo(s.product.category);
+
+                    return (
+                      <div key={s.product.id} className="border border-slate-100 p-4 rounded-2xl flex flex-col justify-between space-y-3 bg-slate-50/50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div>
+                            <span className="font-display font-bold text-sm text-[#012b25] truncate max-w-[160px]">{s.product.name}</span>
+                          </div>
+                          <button onClick={() => onUnlock(s.product.id)} className="text-slate-400 hover:text-rose-600 transition-colors">🔓 ปลดล็อก</button>
+                        </div>
+                        
+                        <div>
+                          <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-500 mb-1">
+                            <span>ยอดทำจริงเทียบกับเป้าหมายความถี่:</span>
+                            <span>{made} / {Math.round(target)} คลิป ({pct}%)</span>
+                          </div>
+                          <div className="w-full h-2 bg-slate-200/60 rounded-full overflow-hidden">
+                            <div className="h-full bg-[#bcd924] rounded-full transition-all duration-300" style={{ width: `${pct}%` }}></div>
+                          </div>
+                        </div>
+
+                        <button onClick={() => onSelectProduct(s.product.id)} className="w-full bg-white text-slate-600 text-xs font-bold py-2 rounded-xl text-center border border-slate-200 hover:bg-slate-50 transition-all">เปิดดูสเปก & ปั่นบทสคริปต์ 👉</button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-function ClipLogPage({ products, clips, onEditClip, onMarkRepostDone, onPromoteToA }) {
-  const [search, setSearch] = useState(''); const [period, setPeriod] = useState('30');
+function ClipLogPage({ products, clips, onEditClip, onMarkRepostDone, onPromoteToA, onMakeSimilar }) {
+  const [view, setView] = useState('log'); // Switch between 'log' and 'dashboard'
+  const [search, setSearch] = useState(''); 
+  const [period, setPeriod] = useState('30');
+
   const filtered = useMemo(() => {
     return clips.filter(c => {
       if (search && !c.hook?.toLowerCase().includes(search.toLowerCase())) return false;
@@ -1372,31 +1669,31 @@ function ClipLogPage({ products, clips, onEditClip, onMarkRepostDone, onPromoteT
     }).sort((a,b) => new Date(b.postedAt) - new Date(a.postedAt));
   }, [clips, search, period]);
 
-  const roi = useMemo(() => getROIAnalysis(products, clips, MONTHLY_REVENUE_TARGET), [products, clips]);
-  const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
-
   return (
     <div className="space-y-6">
-      {/* Sales Overview Stat (Pharmly 4.jpg Table Style) */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <OverviewKPI icon={DollarSign} label="Total Revenue" value={`฿${fmtNum(totalGMVMonth * 7)}`} sub="รวมจากที่เซฟสิทธิ์" />
-        <OverviewKPI icon={Trophy} label="Total Profit" value={`฿${fmtNum(totalGMVMonth)}`} sub="คำนวณจากค่าคอมเฉลี่ย" />
-        <OverviewKPI icon={Flame} label="Total Cost" value={`฿${fmtNum(totalGMVMonth * 0.1)}`} sub="งบค่าใช้จ่ายเทสผลิตภัณฑ์" />
-        <OverviewKPI icon={Activity} label="Average Order Value" value="฿245.50" sub="เฉลี่ยจากข้อมูลการสับรหัส" />
+      {/* Tab Switcher Headers */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-display text-xl text-slate-800">คลังสถิติผลงานเนื้อหาประเสริฐ (Metrics & Logs)</h2>
+          <p className="text-xs text-slate-400">แทร็กประสิทธิภาพ วิ่งเข้าเส้นทางรายได้ค่าคอมคอมมิชชันจริง</p>
+        </div>
+        <div className="flex bg-white rounded-2xl p-1 border border-slate-200 shadow-sm">
+          <button onClick={() => setView('log')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${view === 'log' ? 'bg-[#012b25] text-white' : 'text-slate-500 hover:text-slate-700'}`}>📋 Clip Log</button>
+          <button onClick={() => setView('dashboard')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${view === 'dashboard' ? 'bg-[#012b25] text-white' : 'text-slate-500 hover:text-slate-700'}`}>📊 Dashboard วิเคราะห์พอร์ต</button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-        {/* Table Logs */}
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm xl:col-span-2 space-y-4">
+      {view === 'log' ? (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div><h3 className="font-display text-base text-[#012b25]">📋 คลังบันทึกประวัติวิดีโอคลิป (Clip Logs)</h3><p className="text-xs text-slate-400">กดรายแถวตารางเพื่ออัปเดต Views ครบกำหนด 24h / 7d</p></div>
+            <h3 className="font-display text-base text-[#012b25]">📋 ประวัติ Logs รายชิ้นงาน</h3>
             <div className="flex gap-1">
               {['7', '30', 'all'].map(p => (
                 <button key={p} onClick={() => setPeriod(p)} className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border ${period === p ? 'bg-[#012b25] text-white border-transparent' : 'bg-slate-50 text-slate-600'}`}>{p === 'all' ? 'ทั้งหมด' : `${p} วันล่าสุด`}</button>
               ))}
             </div>
           </div>
-          <div className="relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clip hook..." className="w-full pl-10 pr-4 py-2 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
+          <div className="relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clip hook..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
           
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse text-slate-600">
@@ -1418,305 +1715,310 @@ function ClipLogPage({ products, clips, onEditClip, onMarkRepostDone, onPromoteT
             </table>
           </div>
         </div>
-
-        {/* Heatmap & Financial Dashboard Path */}
-        <div className="space-y-6">
-          {/* Orders By Time (ดึงชั่วโมงโพสต์คลิปจริงมาคำนวณ Heatmap) */}
-          <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-            <div>
-              <h3 className="font-display text-base text-[#012b25]">Orders By Time</h3>
-              <p className="text-[10px] text-slate-400">ช่วงเวลาอัปโพสต์คลิปที่สร้างประวัติเยอะที่สุด</p>
-            </div>
-            <HeatmapGrid clips={clips} />
-          </div>
-
-          <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-            <div className="border-b border-slate-50 pb-3"><h3 className="font-display text-base text-[#012b25]">Path to target</h3><p className="text-xs text-slate-400 font-medium">สูตรคำนวณสะสม: ยอดขายจริง $\times$ ค่าคอม %</p></div>
-            <div className="p-4 bg-gradient-to-br from-[#012b25] to-[#043c34] text-white rounded-2xl space-y-1.5 shadow-inner">
-              <div className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider">ประมาณการค่าคอมปัจจุบัน</div>
-              <div className="font-display text-2xl font-bold tracking-tight">฿{fmtNum(Math.round(roi.totalCommRevenue))}</div>
-              <div className="w-full h-1.5 bg-[#034c40] rounded-full overflow-hidden"><div className="h-full bg-[#bcd924] rounded-full" style={{ width: `${Math.min(100, roi.pct)}%` }}></div></div>
-              <div className="flex items-center justify-between text-[10px] text-emerald-200 mt-1 font-mono"><span>{roi.pct}% ถึงเป้า</span><span>ยังขาดอีก: ฿{fmtNum(Math.round(roi.gap))}</span></div>
-            </div>
-
-            <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">สัดส่วนพอร์ตสินค้าปัจจุบัน:</div>
-              {roi.items.slice(0, 5).map(i => (
-                <div key={i.product.id} className="p-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-xs">
-                  <span className="font-semibold text-slate-700 truncate max-w-[150px]">{i.product?.name || 'ไม่ระบุชื่อ'}</span>
-                  <span className="font-mono font-bold text-slate-900">฿{fmtNum(Math.round(i.currentCommRevenue))}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+      ) : (
+        <DashboardView products={products} clips={clips} onMakeSimilar={onMakeSimilar} onEditClip={onEditClip} onMarkRepostDone={onMarkRepostDone} onPromoteToA={onPromoteToA} />
+      )}
     </div>
   );
 }
 
 // ============================================================================
-// [ZONE 5] SYSTEM MODALS ENGINE COMPONENTS (กล่องป๊อปอัพฟอร์มป้อนข้อมูลทั้งหมด)
+// [ZONE 4.5] DYNAMIC PORTFOLIO ANALYTICS (บอร์ดสถิติวิเคราะห์กลยุทธ์พอร์ต)
 // ============================================================================
-function ModalWrapper({ title, onClose, children, footer }) {
-  return (
-    <div className="fixed inset-0 bg-[#012b25]/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
-      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col relative max-h-[85vh] overflow-hidden border border-[#e9eceb]">
-        <button onClick={onClose} className="absolute top-4 right-4 p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-full transition-colors z-10"><X className="w-4 h-4" /></button>
-        <div className="px-6 py-5 border-b border-slate-100 bg-white"><h3 className="font-display text-base text-[#012b25]">{title}</h3></div>
-        <div className="p-6 overflow-y-auto flex-1 space-y-4 bg-slate-50/50 text-xs">{children}</div>
-        {footer && <div className="p-4 border-t border-slate-100 bg-white">{footer}</div>}
-      </div>
-    </div>
-  );
-}
+function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepostDone, onPromoteToA }) {
+  const [period, setPeriod] = useState('30');
+  const days = Number(period);
+  const cutoff = Date.now() - days * 86400000;
+  const recent = useMemo(() => clips.filter(c => new Date(c.postedAt).getTime() >= cutoff), [clips, cutoff]);
 
-function InputField({ label, hint, children }) {
-  return (
-    <div className="space-y-1">
-      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide block">{label}</label>
-      {children}
-      {hint && <span className="text-[10px] text-slate-400 font-medium block mt-0.5">{hint}</span>}
-    </div>
-  );
-}
+  // RESTORED: Portfolio balance check dynamically calculated!
+  const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips, days), [products, clips, days]);
 
-function AddProductModal({ onClose, onSave, showToast }) {
-  const [name, setName] = useState(''); const [brand, setBrand] = useState('');
-  const [category, setCategory] = useState('A'); const [productType, setProductType] = useState('supplement');
-  const [price, setPrice] = useState(''); const [commission, setCommission] = useState('10'); const [isShopAds, setIsShopAds] = useState(false);
+  // RESTORED: Advanced algorithmic recommendations compiled!
+  const recommendations = useMemo(() => {
+    if (!Array.isArray(products)) return [];
+    return products.map(p => {
+      const sales = getProductSales(p, clips, days);
+      const tiktok = sales.fromManual;
+      const clipCount = sales.clipCount;
+      const clipGMV = sales.fromClips;
 
-  const handleSave = () => {
-    if (!name) { showToast("กรุณาระบุชื่อสินค้า", "error"); return; }
-    onSave({ name, brand, category, productType, price: Number(price)||0, isShopAds, scorecard: { commission: Number(commission)||0 } });
-    onClose();
-  };
+      if (sales.hasManual) {
+        if (tiktok >= 30000 && clipCount < 3) return { product: p, rec: 'ดันด่วน', reason: `TikTok ฿${fmtNum(tiktok)} แต่ลงแค่ ${clipCount} คลิป — ดันให้ถี่ขึ้นอีก`, color: 'bg-[#dc2626]', icon: Flame };
+        if (tiktok >= 30000) return { product: p, rec: 'ดันต่อ', reason: `TikTok ฿${fmtNum(tiktok)} — สินค้าหลักสร้างทราฟิกพอร์ต`, color: 'bg-[#1d7c2a]', icon: TrendingUp };
+        if (tiktok >= 10000 && clipCount < 3) return { product: p, rec: 'ลงเพิ่ม', reason: `ขายดีบน TikTok ฿${fmtNum(tiktok)} — ลงคลิปสับรหัสเพิ่ม`, color: 'bg-[#d97706]', icon: Lightbulb };
+        if (tiktok >= 10000) return { product: p, rec: 'ทำต่อ', reason: `TikTok ฿${fmtNum(tiktok)}`, color: 'bg-blue-600', icon: Activity };
+        if (tiktok >= 1000) return { product: p, rec: 'เปลี่ยนมุม', reason: `TikTok ฿${fmtNum(tiktok)} — เร่งหา Angle และ Pain ชุดใหม่`, color: 'bg-purple-600', icon: Lightbulb };
+        if (clipCount >= 3) return { product: p, rec: 'พักดู', reason: `ลงตั้ง ${clipCount} คลิปแต่ยอด TikTok เกือบ 0`, color: 'bg-slate-500', icon: TrendingDown };
+        return null;
+      }
 
-  return (
-    <ModalWrapper title="เพิ่มประวัติข้อมูลสินค้าใหม่" onClose={onClose} footer={<button onClick={handleSave} className="w-full bg-[#012b25] text-white font-bold py-3.5 rounded-2xl hover:bg-[#033c32] transition-all text-xs shadow-md shadow-emerald-950/20">เซฟลงฐานข้อมูลหลัก</button>}>
-      <InputField label="ชื่อเรียกรายการสินค้า *"><input value={name} onChange={e=>setName(e.target.value)} placeholder="เช่น Baam Creatine 300g" className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-      <InputField label="ชื่อแบรนด์"><input value={brand} onChange={e=>setBrand(e.target.value)} placeholder="เช่น Fitway" className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-      <InputField label="ประเภทสินค้าหลัก"><select value={productType} onChange={e=>setProductType(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none">{PRODUCT_TYPES.map(t=><option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select></InputField>
-      <div className="grid grid-cols-2 gap-3">
-        <InputField label="ราคาขายหน้าร้าน ฿"><input type="number" value={price} onChange={e=>setPrice(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-        <InputField label="เปอร์เซ็นต์ค่าคอม %"><input type="number" value={commission} onChange={e=>setCommission(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-      </div>
-      <InputField label="หมวดหมู่ยุทธศาสตร์พอร์ต"><select value={category} onChange={e=>setCategory(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none">{['A','B','C','D'].map(c=><option key={c} value={c}>หมวด {c} - {ABCD_INFO[c].desc}</option>)}</select></InputField>
-      <label className="flex items-center gap-2 bg-white p-3 border border-slate-100 rounded-xl cursor-pointer"><input type="checkbox" checked={isShopAds} onChange={e=>setIsShopAds(e.target.checked)} className="w-4 h-4 rounded text-emerald-950 focus:ring-0" /><span className="text-xs font-semibold text-slate-700">🛒 สินค้านี้เข้าร่วมตะกร้าแดง (Shop Ads)</span></label>
-    </ModalWrapper>
-  );
-}
+      if (clipCount === 0) return null;
+      const revPerClip = clipGMV / clipCount;
+      if (revPerClip >= 2000 && clipCount >= 2) return { product: p, rec: 'ดันต่อ', reason: `คอมมิชชัน ฿${fmtNum(Math.round(revPerClip))}/คลิป — เอนจินประสิทธิภาพสูง`, color: 'bg-[#1d7c2a]', icon: TrendingUp };
+      return null;
+    }).filter(Boolean).sort((a, b) => b.product?.scorePct - a.product?.scorePct);
+  }, [products, clips, days]);
 
-function EditProductInfoModal({ product, onClose, onSave }) {
-  const [name, setName] = useState(product.name || ''); const [brand, setBrand] = useState(product.brand || '');
-  const [price, setPrice] = useState(product.price || ''); const [isShopAds, setIsShopAds] = useState(!!product.isShopAds);
-  const [last7d, setLast7d] = useState(product.salesData?.last7d || ''); const [last30d, setLast30d] = useState(product.salesData?.last30d || '');
+  // RESTORED: E-Candidates detection
+  const eCandidates = useMemo(() => getECandidates(products, clips), [products, clips]);
 
-  return (
-    <ModalWrapper title="แก้ไขรายละเอียดเชิงลึกของแฟ้มสินค้า" onClose={onClose} footer={<button onClick={() => { onSave({ name, brand, price: Number(price), isShopAds, salesData: { last7d: Number(last7d), last30d: Number(last30d), updatedAt: new Date().toISOString() } }); }} className="w-full bg-[#012b25] text-white font-bold py-3.5 rounded-2xl hover:bg-[#033c32] transition-all text-xs">อัปเดตสิทธิ์ข้อมูล</button>}>
-      <InputField label="ชื่อเรียกสินค้าทางการ"><input value={name} onChange={e=>setName(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-      <InputField label="ชื่อแบรนด์ผู้จัดจำหน่าย"><input value={brand} onChange={e=>setBrand(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-      <InputField label="ราคาหน้าร้านสุทธิ ฿"><input type="number" value={price} onChange={e=>setPrice(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-      <label className="flex items-center gap-2 bg-white p-3 border border-slate-100 rounded-xl cursor-pointer"><input type="checkbox" checked={isShopAds} onChange={e=>setIsShopAds(e.target.checked)} className="w-4 h-4 text-emerald-950" /><span>🛒 เข้าร่วมแคมเปญสิทธิ์ตะกร้าแดง</span></label>
-      
-      <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl space-y-3">
-        <h4 className="font-display text-xs text-emerald-950 flex items-center gap-1">📊 ยอดขายจริงป้อนตรงแมนนวล (จากหลังบ้าน TikTok Shop)</h4>
-        <div className="grid grid-cols-2 gap-2">
-          <InputField label="ยอดขาย 7 วันสะสม ฿"><input type="number" value={last7d} onChange={e=>setLast7d(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-          <InputField label="ยอดขาย 30 วันสะสม ฿"><input type="number" value={last30d} onChange={e=>setLast30d(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-        </div>
-      </div>
-    </ModalWrapper>
-  );
-}
+  // RESTORED: Products to cut system
+  const cutCandidates = useMemo(() => getProductsToCut(products, clips), [products, clips]);
 
-function EditScoreModal({ product, onClose, onSave }) {
-  const [comm, setComm] = useState(product.scorecard?.commission || '');
-  const [cr, setCr] = useState(product.scorecard?.crPct || '');
-  const [conc, setConc] = useState(product.scorecard?.concentration || '');
+  // RESTORED: Category stats calculation for bars
+  const abcdStats = useMemo(() => {
+    const stats = { A: { gmv: 0, count: 0 }, B: { gmv: 0, count: 0 }, C: { gmv: 0, count: 0 }, D: { gmv: 0, count: 0 } };
+    recent.filter(c => !c.isV).forEach(c => {
+      const p = products.find(pp => pp.id === c.productId);
+      if (p?.category && stats[p.category]) {
+        stats[p.category].gmv += Number(c.gmv) || 0;
+        stats[p.category].count += 1;
+      }
+    });
+    return stats;
+  }, [products, recent]);
 
-  return (
-    <ModalWrapper title="ประเมินทบทวนน้ำหนักคะแนน Argoon Score" onClose={onClose} footer={<button onClick={() => onSave(product.id, { ...product.scorecard, commission: Number(comm), crPct: Number(cr), concentration: Number(conc) })} className="w-full bg-[#012b25] text-white font-bold py-3.5 rounded-2xl hover:bg-[#033c32] transition-all text-xs">ประมวลผลเซฟสิทธิ์เกณฑ์คะแนนใหม่</button>}>
-      <div className="space-y-3">
-        <InputField label="อัตราเปอร์เซ็นต์ค่าคอมมิชชั่นล่าสุด %"><input type="number" value={comm} onChange={e=>setComm(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-        <InputField label="อัตราการซื้อสำเร็จร้านค้า (CR %)"><input type="number" value={cr} onChange={e=>setCr(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-        <InputField label="ค่าเปอร์เซ็นต์ความเข้มข้นตลาด (Concentration %)"><input type="number" value={conc} onChange={e=>setConc(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-mono" /></InputField>
-      </div>
-    </ModalWrapper>
-  );
-}
+  const maxCategoryGmv = Math.max(...Object.values(abcdStats).map(s => s.gmv), 1);
 
-function AddPainModal({ onClose, onSave }) {
-  const [text, setText] = useState(''); const [source, setSource] = useState('personal');
-  return (
-    <ModalWrapper title="📥 เพิ่ม Pain Point ถังความเจ็บปวดผู้ซื้อ" onClose={onClose} footer={<button onClick={() => { if(text.trim()) onSave(text.trim(), source); }} className="w-full bg-[#012b25] text-white font-bold py-3.5 rounded-2xl hover:bg-[#033c32] transition-all text-xs">เซฟบรรจุลงคลัง Pain</button>}>
-      <InputField label="ประโยคปัญหา / คำบ่นลูกค้าในคอมเมนต์"><textarea value={text} onChange={e=>setText(e.target.value)} rows={3} placeholder="เช่น ทานแล้วละลายยาก มีก้อนนอนก้นหนืดคอ..." className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-      <InputField label="ที่มาแหล่งที่มาข้อมูลปัญหา"><select value={source} onChange={e=>setSource(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none">{PAIN_SOURCES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></InputField>
-    </ModalWrapper>
-  );
-}
+  // RESTORED: Pillar stats distribution
+  const pillarStats = useMemo(() => {
+    const stats = {}; DEFAULT_PILLARS.forEach(p => stats[p.id] = 0);
+    recent.forEach(c => {
+      if (c.pillarId && stats[c.pillarId] !== undefined) stats[c.pillarId] += 1;
+    });
+    return stats;
+  }, [recent]);
 
-function AddAngleModal({ onClose, onSave }) {
-  const [text, setText] = useState('');
-  return (
-    <ModalWrapper title="🎯 เพิ่มมุมมองนำสายตาคอนเทนต์ (Angle Bank)" onClose={onClose} footer={<button onClick={() => { if(text.trim()) onSave(text.trim()); }} className="w-full bg-[#012b25] text-white font-bold py-3.5 rounded-2xl">บรรจุเข้ากระดาน</button>}>
-      <InputField label="ไอเดียมุมเล่าปักหัวสคริปต์"><textarea value={text} onChange={e=>setText(e.target.value)} rows={3} placeholder="เช่น แบไต๋พิสูจน์ตักสเปกดู EPA หลังกล่องแทนฉลากหน้าแบรนด์..." className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-    </ModalWrapper>
-  );
-}
+  const maxPillarCount = Math.max(...Object.values(pillarStats), 1);
 
-function LockProductModal({ product, onClose, onSave }) {
-  const [target, setTarget] = useState(10);
-  return (
-    <ModalWrapper title={`🔒 ตรึงโฟกัสสินค้าเป้าหมายเดือนนี้`} onClose={onClose} footer={<button onClick={() => onSave(target, [])} className="w-full bg-[#012b25] text-white font-bold py-3.5 rounded-2xl">ล็อกตำแหน่งยุทธศาสตร์หลัก</button>}>
-      <InputField label="จำนวนคลิปเป้าหมายย่อยที่ต้องส่งมอบในเดือนนี้"><input type="number" value={target} onChange={e=>setTarget(Number(e.target.value))} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-mono focus:outline-none" /></InputField>
-    </ModalWrapper>
-  );
-}
+  // RESTORED: Product type distribution
+  const typeStats = useMemo(() => {
+    const stats = {}; PRODUCT_TYPES.forEach(t => stats[t.id] = { clips: 0, gmv: 0 });
+    recent.filter(c => !c.isV).forEach(c => {
+      const p = products.find(pp => pp.id === c.productId);
+      if (p?.productType && stats[p.productType]) {
+        stats[p.productType].clips += 1;
+        stats[p.productType].gmv += Number(c.gmv) || 0;
+      }
+    });
+    return stats;
+  }, [products, recent]);
 
-function AddClipModal({ products, defaultProductId, onClose, onSave, showToast }) {
-  const [isV, setIsV] = useState(false); const [productId, setProductId] = useState(defaultProductId || '');
-  const [pillarId, setPillarId] = useState(''); const [hook, setHook] = useState('');
-  const [gmv, setGmv] = useState(''); const [views7d, setViews7d] = useState('');
-  const [postedAt, setPostedAt] = useState(todayStr());
+  const maxTypeGmv = Math.max(...Object.values(typeStats).map(s => s.gmv), 1);
 
-  const handleSave = () => {
-    if (!isV && !productId) { showToast("กรุณาเลือกรายการสินค้าคู่สัญญา", "error"); return; }
-    onSave({ isV, productId: isV ? null : productId, pillarId, hook, gmv: Number(gmv)||0, views7d: Number(views7d)||0, postedAt: new Date(postedAt).toISOString() });
-    onClose();
-  };
-
-  return (
-    <ModalWrapper title="🎬 บันทึกวิดีโอคลิปลงคลังประวัติ Log" onClose={onClose} footer={<button onClick={handleSave} className="w-full bg-[#012b25] text-white font-bold py-3.5 rounded-2xl text-xs shadow-md">กด Commit บันทึกลงคลัง</button>}>
-      <InputField label="รูปแบบคัตคลาสชนิดคลิป"><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setIsV(false)} className={`py-2 text-center border font-bold rounded-xl ${!isV ? 'bg-[#012b25] text-white border-transparent' : 'bg-white text-slate-600'}`}>📦 คลิปตะกร้าสินค้า</button><button type="button" onClick={() => setIsV(true)} className={`py-2 text-center border font-bold rounded-xl ${isV ? 'bg-[#012b25] text-white border-transparent' : 'bg-white text-slate-600'}`}>📚 คลิปความรู้ (V)</button></div></InputField>
-      {!isV && (<InputField label="จับคู่ชิ้นสินค้าหลัก"><select value={productId} onChange={e=>setProductId(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none"><option value="">-- กรุณาเลือกรายการ --</option>{products.map(p=><option key={p.id} value={p.id}>[{p.category}] - {p.name}</option>)}</select></InputField>)}
-      <InputField label="สเปก Pillar ประจำคลิป"><select value={pillarId} onChange={e=>setPillarId(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none font-semibold"><option value="">-</option>{DEFAULT_PILLARS.map(pl=><option key={pl.id} value={pl.id}>{pl.id} - {pl.name}</option>)}</select></InputField>
-      <InputField label="ข้อความประโยคคำเปิดหัว Hook"><input value={hook} onChange={e=>setHook(e.target.value)} placeholder="พิมพ์คำแรก 3 วินาทีแรกของคลิป..." className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-      <div className="grid grid-cols-2 gap-2">
-        <InputField label="ยอดวิวสะสมครบ 7 วันล่าสุด"><input type="number" value={views7d} onChange={e=>setViews7d(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-mono focus:outline-none" /></InputField>
-        <InputField label="ยอดรวมค่า GMV คลิป ฿"><input type="number" value={gmv} onChange={e=>setGmv(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-mono focus:outline-none" /></InputField>
-      </div>
-      <InputField label="วันที่และเวลาโพสต์อัปโหลดคลิปจริง"><input type="date" value={postedAt} onChange={e=>setPostedAt(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-mono focus:outline-none" /></InputField>
-    </ModalWrapper>
-  );
-}
-
-function EditClipModal({ clip, products, onClose, onSave, onDelete }) {
-  const [hook, setHook] = useState(clip?.hook || ''); const [views7d, setViews7d] = useState(clip?.views7d || '');
-  const [gmv, setGmv] = useState(clip?.gmv || '');
-
-  return (
-    <ModalWrapper title="✏️ แก้ไขแก้ไขผลลัพธ์และตัวเลขคลิป" onClose={onClose} footer={<div className="flex gap-2"><button onClick={onDelete} className="bg-slate-100 text-rose-600 font-bold px-3 py-3 rounded-xl hover:bg-rose-50 transition text-xs">🗑️ ลบชิ้นนี้</button><button onClick={() => onSave({ hook, views7d: Number(views7d), gmv: Number(gmv) })} className="flex-1 bg-[#012b25] text-white font-bold py-3.5 rounded-2xl text-xs hover:bg-[#033c32] transition shadow-md">บันทึกข้อมูลใหม่</button></div>}>
-      <InputField label="คำพูดสคริปต์ Hook ล่าสุด"><input value={hook} onChange={e=>setHook(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none" /></InputField>
-      <InputField label="ยอดวิวสะสมรอบ 7 วันสุดท้าย"><input type="number" value={views7d} onChange={e=>setViews7d(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-mono focus:outline-none" /></InputField>
-      <InputField label="ยอดขายรวม GMV คลิป ณ ปัจจุบัน ฿"><input type="number" value={gmv} onChange={e=>setGmv(e.target.value)} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-mono focus:outline-none" /></InputField>
-    </ModalWrapper>
-  );
-}
-
-// โมดอลปั่นไอเดียคลิปคล้ายคลิป Winner ดึงโครงสร้างเดิมสมบูรณ์ (MakeSimilarModal)
-function MakeSimilarModal({ clip, products, onClose }) {
-  const product = Array.isArray(products) ? products.find(p => p.id === clip?.productId) : null;
-  const [copied, setCopied] = useState(false);
-
-  const generatePrompt = () => {
-    if (!product && !clip?.isV) return 'ไม่พบสินค้าคู่สัญญา';
-    const pillar = DEFAULT_PILLARS.find(p => p.id === clip?.pillarId);
-    const pain = product?.pains?.find(p => p.id === clip?.painId);
-    const angle = product?.angles?.find(a => a.id === clip?.angleId);
-    return `เขียนสคริปต์ใหม่ 3 แนวคิด (แตกมุมเล่า) จากคลิปกระตุ้นยอดขายเดิม
-
-[คลิปทำเงินเดิม]
-Hook: ${clip?.hook || '-'}
-ยอดรวม GMV: ฿${fmtNum(clip?.gmv || 0)}
-
-[รายละเอียด]
-ชื่อสินค้า: ${product ? product.name : 'Value Content (V)'}
-หมวดสินค้า: ${product ? ABCD_INFO[product.category]?.label : 'คอนเทนต์ความรู้'}
-Pillarช่อง: ${pillar ? pillar.name : '-'}
-PainPoint: ${pain ? pain.text : '-'}
-Angleเล่า: ${angle ? angle.text : '-'}
-
-[คำสั่งปั่นไอเดีย]
-รื้อสคริปต์เก่าโดยดึงแง่มุมความเจ็บปวดเดิม แต่เปลี่ยนองค์ประกอบการปั้น 3 ชิ้นใหม่:
-1. เปลี่ยนกลุ่มคนฟัง (Persona) เช่น นักวิ่งทางไกล / พนักงานกินมื้อดึก / มือใหม่หัดยกเวท
-2. เปลี่ยนจังหวะชีวิต (Situation) เช่น ปริมาณโปรตีนพกพาไปออฟฟิศ / ก่อนคาร์ดิโอเช้า
-3. เปลี่ยนรูปแบบเนื้อหา (Format) เช่น POV ห้ามทำแบบนี้ / เปรียบเทียบ 2 ทางเลือก`;
-  };
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(generatePrompt());
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {}
-  };
-
-  return (
-    <ModalWrapper title="🏆 แตกไลน์คลิปทำเงิน (Make Similar)" onClose={onClose} footer={<button onClick={handleCopy} className={`w-full font-bold py-3.5 rounded-2xl text-xs transition-all shadow-md ${copied ? 'bg-emerald-600 text-white' : 'bg-[#bcd924] text-[#012b25]'}`}>{copied ? '✓ คัดลอกพรอมต์เสร็จเรียบร้อย' : 'Copy AI Prompt'}</button>}>
-      <div className="bg-slate-100 p-4 rounded-2xl space-y-1.5 mb-2 border border-slate-200/40">
-        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">วิดีโอคลิปต้นแบบ:</span>
-        <div className="text-sm font-bold text-[#012b25] line-clamp-1">{clip?.hook || 'ไม่มีคำเปรย Hook'}</div>
-        <div className="text-[11px] text-slate-500 font-medium">ทำยอดสะสม: ฿{fmtNum(clip?.gmv || 0)}</div>
-      </div>
-      <p className="text-slate-500 text-[11px] leading-relaxed">ก๊อปปี้พรอมต์อัตโนมัตินี้ไปใส่ Claude หรือ ChatGPT เพื่อดีดเป็นสูตรบทสคริปต์มุมมองใหม่ 3 ทางเลือกสำหรับการลงเสียงทันที</p>
-      <textarea readOnly value={generatePrompt()} className="w-full h-32 p-3 bg-stone-900 text-stone-300 font-mono text-[10px] rounded-xl focus:outline-none resize-none mt-2" />
-    </ModalWrapper>
-  );
-}
-
-// โมดอล Backup & Export JSON (BackupModal)
-function BackupModal({ products, clips, onClose, showToast }) {
-  const data = { products, clips, exportedAt: new Date().toISOString(), version: 2.5 };
-  const jsonString = JSON.stringify(data, null, 2);
-  const [downloaded, setDownloaded] = useState(false);
-
-  const handleDownload = () => {
-    try {
-      const blob = new Blob([jsonString], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `peem6pack-command-backup-${todayStr()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-      setDownloaded(true);
-      setTimeout(() => setDownloaded(false), 2000);
-      showToast('ดาวน์โหลดคลังสำรองดิบเรียบร้อยแล้ว');
-    } catch (e) {
-      showToast('ระบบดาวน์โหลดผ่านบราวเซอร์ขัดข้อง', 'error');
+  // RESTORED: Monthly comparison trend (6 months back)
+  const monthlyTrend = useMemo(() => {
+    const months = []; const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const ymKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const mclips = clips.filter(c => c.postedAt?.slice(0, 7) === ymKey);
+      months.push({ 
+        key: ymKey, 
+        label: d.toLocaleDateString('th-TH', { month: 'short' }), 
+        clipCount: mclips.length, 
+        gmv: mclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0) 
+      });
     }
-  };
+    return months;
+  }, [clips]);
+
+  const maxMonthlyClips = Math.max(...monthlyTrend.map(m => m.clipCount), 1);
+  const maxMonthlyGmv = Math.max(...monthlyTrend.map(m => m.gmv), 1);
 
   return (
-    <ModalWrapper title="💾 สำรองข้อมูลพอร์ตโฟลิโอหลัก" onClose={onClose} footer={<button onClick={handleDownload} className={`w-full font-bold py-3.5 rounded-2xl text-xs transition-all shadow-md ${downloaded ? 'bg-emerald-600 text-white' : 'bg-[#bcd924] text-[#012b25]'}`}>{downloaded ? '✓ ดาวน์โหลดสำเร็จ' : 'Download Backup JSON'}</button>}>
-      <div className="bg-slate-100 p-4 rounded-2xl text-center border border-slate-200/40 mb-3">
-        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">ขนาดโครงสร้างข้อมูลปัจจุบัน:</span>
-        <div className="text-xl font-bold font-mono mt-1 text-[#012b25]">{products.length} ผลิตภัณฑ์ / {clips.length} คลิป</div>
-      </div>
-      <p className="text-slate-500 text-[11px] leading-relaxed">ข้อมูลทั้งหมดของคุณซิงค์เก็บอย่างปลอดภัยบน Cloud Firestore ของ Firebase แบบ Real-time แล้ว แต่คุณควรเก็บรหัส Snapshot นี้เป็นไฟล์ .json สำรองไว้ในคอมพิวเตอร์ของคุณเองทุกสิ้นเดือน</p>
-      <textarea readOnly value={jsonString} className="w-full h-24 p-3 bg-stone-900 text-stone-300 font-mono text-[10px] rounded-xl focus:outline-none resize-none mt-2" onClick={e=>e.target.select()} />
-    </ModalWrapper>
-  );
-}
-
-function SettingsModal({ onClose, onExport, onClearAll, migrationLog, onMigrate }) {
-  const [rawJsonInput, setRawJsonInput] = useState('');
-  return (
-    <ModalWrapper title="⚙️ แผงตั้งค่าวิศวรรณระบบบำรุงรักษา" onClose={onClose}>
-      <button onClick={onExport} className="w-full p-4 bg-white border border-slate-200 rounded-2xl text-left hover:bg-slate-50 transition-colors shadow-sm"><div className="font-semibold text-sm text-slate-800">💾 สร้างจุด Backup สำรองข้อมูลดิบ</div><p className="text-[11px] text-slate-400 mt-0.5">ดาวน์โหลดไฟล์เก็บเป็นข้อมูล Snapshot ส่วนตัว</p></button>
-      
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
-        <h4 className="font-display text-xs text-amber-950 flex items-center gap-1">🔄 เครื่องมือย้ายรากฐานข้อมูลระบบเก่า (v1 {"->"} v2 คลาวด์แยกแฟ้ม)</h4>
-        <p className="text-[11px] text-amber-800 leading-normal">นำข้อความรหัสไฟล์ JSON ทั้งหมดที่คุณกดดึงดาวน์โหลดมาจากแอปตัวเก่า มาเปิดก๊อปปี้เทวางลงช่องกล่องด้านล่างนี้ ระบบตัวใหม่จะทำการสับแยกยิงเก็บเข้าพอร์ต Subcollection ให้ทันที ข้อมูลพอร์ตเดิมไม่สูญหายแน่นอนครับ</p>
-        <textarea value={rawJsonInput} onChange={e=>setRawJsonInput(e.target.value)} placeholder="เทวางข้อความโค้ด JSON จากไฟล์สำรองที่นี่..." rows={3} className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-mono focus:outline-none resize-none" />
-        <button type="button" onClick={() => { if(rawJsonInput.trim()) onMigrate(rawJsonInput.trim()); }} className="w-full bg-[#012b25] hover:bg-[#033c32] text-white font-bold py-3.5 rounded-2xl text-[11px] transition-all shadow-md">⚡ เริ่มกระบวนการย้ายข้อมูลพอร์ตเข้า Subcollection ในคลิกเดียว</button>
-        {migrationLog && <div className="p-3 bg-white border border-amber-200 text-amber-900 font-mono text-[10px] rounded-xl mt-2 whitespace-pre-wrap leading-normal">{migrationLog}</div>}
+    <div className="space-y-6">
+      {/* Period Selection Bar */}
+      <div className="flex justify-end gap-1.5 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm self-end">
+        {['7', '30', '90'].map(d => (
+          <button key={d} onClick={() => setPeriod(d)} className={`text-xs font-bold px-4 py-2 rounded-xl border transition-all ${period === d ? 'bg-[#012b25] text-white border-transparent' : 'bg-slate-50 text-slate-500'}`}>{d} วันล่าสุด</button>
+        ))}
       </div>
 
-      <div className="border-t border-slate-200/60 pt-4 mt-2"><button onClick={onClearAll} className="w-full p-3.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-2xl text-left font-bold text-xs">🗑️ ล้างทำลายล้างสระพอร์ตข้อมูลคลาวด์ทั้งหมดถาวร</button></div>
-    </ModalWrapper>
+      {/* PORTFOLIO BALANCE MONITOR */}
+      {portfolioBalance && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Target className="w-4 h-4 text-emerald-800" /> ตรวจสอบสมดุลสัดส่วนช่อง (Portfolio Balance Target)</h3>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">เป้าหมายมาตรฐาน: A 60% / B 25% / C 10% / D 5% (คำนวณจากยอด GMV {period} วันล่าสุด)</p>
+          
+          <div className="space-y-4 pt-1">
+            {Object.entries(portfolioBalance).map(([k, b]) => {
+              const info = getAbcdInfo(k);
+              const statusColors = b.status === 'ok' ? 'bg-[#1d7c2a]' : 'bg-[#d97706]';
+              return (
+                <div key={k} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-5 h-5 rounded ${info.bg} text-white flex items-center justify-center text-[10px]`}>{k}</div>
+                      <span className="text-slate-600">{info.desc}</span>
+                    </div>
+                    <span className="font-mono text-slate-700">{b.actual}% / {b.target}% <span className="text-slate-400">({b.status === 'ok' ? 'OK' : `สัดส่วนคลาดเคลื่อน ${b.diff > 0 ? '+' : ''}${b.diff}%`})</span></span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${statusColors}`} style={{ width: `${Math.min(100, b.actual)}%` }}></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* E-CANDIDATES & PRODUCTS TO CUT ROW */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* E-Candidates */}
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-purple-600" /> 💎 ตรวจพบสินค้านางฟ้า (E-Candidates)</h3>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">แบรนด์ระดับดาวรุ่งรอขยับหมวดเป็น A</p>
+          <div className="space-y-3">
+            {eCandidates.length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-8">ยังไม่ตรวจพบแบรนด์ดาวรุ่งที่มีผลงานเทียบเท่านางฟ้า</p>
+            ) : (
+              eCandidates.map(e => {
+                const dec = getDecisionInfo(e.product.decision);
+                return (
+                  <div key={e.product.id} className="p-4 bg-gradient-to-br from-purple-50/20 to-white border border-purple-100 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-display font-bold text-[#012b25] text-sm">{e.product.name}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${dec.bg} ${dec.text}`}>{dec.label}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {e.reasons.map((r, idx) => (
+                        <span key={idx} className="text-[9px] bg-purple-50 text-purple-700 font-bold px-2 py-0.5 rounded-md">✓ {r}</span>
+                      ))}
+                    </div>
+                    <button onClick={() => onPromoteToA(e.product.id)} className="w-full bg-[#012b25] text-white font-bold text-xs py-2 rounded-xl shadow-sm">โปรโมตขึ้นพอร์ตระดับ A 🔥</button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Products to Cut */}
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><AlertTriangle className="w-4 h-4 text-rose-500" /> ⚠️ เกณฑ์พิจารณาถอดออกจากสิทธิ์พอร์ต (Cut Candidates)</h3>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">แบรนด์ที่ควรหยุดทำคลิปเพื่อเซฟงบแอดสเปน</p>
+          <div className="space-y-3">
+            {cutCandidates.length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-8">ยินดีด้วย! ยังไม่พบแบรนด์สินค้าเข้าเกณฑ์ถอดสิทธิ์วิกฤต</p>
+            ) : (
+              cutCandidates.map(c => (
+                <div key={c.product.id} className="p-4 bg-rose-50/30 border border-rose-100 rounded-2xl space-y-2">
+                  <div className="font-display font-bold text-rose-950 text-sm">{c.product.name}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {c.reasons.map((r, idx) => (
+                      <span key={idx} className="text-[9px] bg-rose-100/50 text-rose-700 font-bold px-2 py-0.5 rounded-md">{r}</span>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* CATEGORY & PILLAR BARS ANALYSIS GRID */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* ABCD Category GMV breakdown */}
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-display text-base text-[#012b25]">🎯 วิเคราะห์สัดส่วนผลงานรายหมวด ABCD ({period}d)</h3>
+          <div className="space-y-4">
+            {Object.entries(abcdStats).map(([k, s]) => {
+              const info = getAbcdInfo(k);
+              const barWidth = Math.round((s.gmv / maxCategoryGmv) * 100);
+              return (
+                <div key={k} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-5 h-5 rounded ${info.bg} text-white flex items-center justify-center text-[10px]`}>{k}</div>
+                      <span>{info.desc}</span>
+                    </div>
+                    <span className="font-mono text-slate-800">฿{fmtNum(s.gmv)} <span className="text-slate-400 font-normal">({s.count} คลิป)</span></span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${info.bg}`} style={{ width: `${barWidth}%` }}></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Pillar distribution charts */}
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-display text-base text-[#012b25]">📚 อัตราการคุมสัดส่วน Variety ตามเสา Pillar ({period}d)</h3>
+          <div className="space-y-4">
+            {DEFAULT_PILLARS.map(p => {
+              const count = pillarStats[p.id] || 0;
+              const barWidth = Math.round((count / maxPillarCount) * 100);
+              return (
+                <div key={p.id} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                    <span>{p.emoji} {p.id} - {p.desc}</span>
+                    <span className="font-mono text-slate-800">{count} คลิป</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-purple-600" style={{ width: `${barWidth}%` }}></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* MONTHLY DOUBLE BAR GRID COMPARE */}
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+        <h3 className="font-display text-base text-[#012b25]">📅 เปรียบเทียบปริมาณคลิป และ ยอด GMV ตลอด 6 เดือนย้อนหลัง</h3>
+        <div className="grid grid-cols-6 gap-3 pt-4">
+          {monthlyTrend.map(m => {
+            const clipH = Math.max(2, Math.round((m.clipCount / maxMonthlyClips) * 60));
+            const gmvH = Math.max(2, Math.round((m.gmv / maxMonthlyGmv) * 60));
+            return (
+              <div key={m.key} className="text-center space-y-2">
+                <div className="flex items-end justify-center gap-1.5 h-16">
+                  <div className="w-3 bg-lime-400 rounded-t-md" style={{ height: `${clipH}px` }} title={`${m.clipCount} คลิป`} />
+                  <div className="w-3 bg-rose-400 rounded-t-md" style={{ height: `${gmvH}px` }} title={`฿${fmtNum(m.gmv)}`} />
+                </div>
+                <div className="text-[10px] font-bold text-slate-400">{m.label}</div>
+                <div className="text-[9px] font-mono font-bold text-slate-600">{m.clipCount} ค. / ฿{m.gmv >= 1000 ? Math.round(m.gmv / 1000) + 'k' : m.gmv}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-center gap-4 pt-2 text-[10px] font-bold">
+          <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-lime-400 rounded" /> จำนวนคลิปโพสต์</div>
+          <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-rose-400 rounded" /> ยอด GMV สะสม</div>
+        </div>
+      </div>
+
+      {/* ALGORITHMIC RECOMMENDATION LIST */}
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+        <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Lightbulb className="w-4 h-4 text-amber-500" /> 💡 คำแนะนำประมวลผลพอร์ตอัจฉริยะ (Recommendations)</h3>
+        <div className="space-y-3">
+          {recommendations.length === 0 ? (
+            <p className="text-xs text-slate-400 italic text-center py-8">ป้อนสถิติตัวเลขจริงเพื่อรับข้อเสนอแนะเชิงพาณิชย์ระดับโปร</p>
+          ) : (
+            recommendations.map(r => {
+              const catInfo = getAbcdInfo(r.product.category);
+              return (
+                <div key={r.product.id} className="p-3.5 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                    <div>
+                      <div className="font-bold text-slate-800">{r.product.name}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{r.reason}</div>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] font-bold text-white px-3 py-1.5 rounded-xl flex-shrink-0 ${r.color}`}>{r.rec}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
