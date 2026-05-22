@@ -1587,18 +1587,39 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
   const [rawData, setRawData] = useState('');
   const [parsedData, setParsedData] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // ✅ 1. ระบบเลือกเดือนที่สแกน (Month Selector) ป้องกันยอดทับซ้อน
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth()); // ค่าเริ่มต้นคือเดือนปัจจุบัน (YYYY-MM)
+
+  // ตัวช่วยสร้างตัวเลือกเดือนย้อนหลัง 6 เดือน
+  const monthOptions = useMemo(() => {
+    const opts = []; const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
+      opts.push({ value: val, label: i === 0 ? `${label} (เดือนปัจจุบัน)` : label });
+    }
+    return opts;
+  }, []);
+
+  // ✅ 2. ตัวช่วยแยกประเภทสินค้าอัตโนมัติ (Auto-Categorize) จากชื่อ
+  const detectProductType = (name) => {
+    const n = name.toLowerCase();
+    if (/รองเท้า|shoes|sneaker/i.test(n)) return 'shoes';
+    if (/เสื้อ|กางเกง|ชุด|ผ้า|กั๊ก|tank|shirt|shorts|apparel/i.test(n)) return 'apparel';
+    if (/โปรตีน|วิตามิน|ซิงค์|อาหารเสริม|creatine|prebiotic|เวย์|whey|gainer/i.test(n)) return 'supplement';
+    if (/บาร์|ดัมเบล|ลูกกลิ้ง|เสื่อ|เครื่องชั่ง|กระดาน|kettlebell|roller|push up/i.test(n)) return 'equipment';
+    return 'other';
+  };
 
   const processData = () => {
     setIsProcessing(true);
     setTimeout(() => {
       try {
         const rows = rawData.trim().split('\n');
-        if (rows.length < 2) {
-          showToast('ข้อมูลไม่ถูกต้อง หรือมีแค่หัวตาราง', 'error');
-          setIsProcessing(false); return;
-        }
+        if (rows.length < 2) { showToast('ข้อมูลไม่ถูกต้อง หรือมีแค่หัวตาราง', 'error'); setIsProcessing(false); return; }
         
-        // Auto-detect การเว้นวรรค (Tab จาก Excel หรือ Comma จาก CSV)
         const delimiter = rows[0].includes('\t') ? '\t' : ',';
         const parseRow = (line) => {
           if (delimiter === '\t') return line.split('\t');
@@ -1613,53 +1634,58 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
         };
 
         const headers = parseRow(rows[0]).map(h => h.trim().replace(/^"|"$/g, ''));
-        const idIdx = headers.indexOf('รหัสสินค้า');
-        const nameIdx = headers.indexOf('ชื่อสินค้า');
-        const priceIdx = headers.indexOf('ราคา');
-        const brandIdx = headers.indexOf('ชื่อร้านค้า');
-        const gmvIdx = headers.indexOf('GMV');
-        const commIdx = headers.indexOf('มาตรฐาน');
+        const idIdx = headers.indexOf('รหัสสินค้า'); const nameIdx = headers.indexOf('ชื่อสินค้า');
+        const priceIdx = headers.indexOf('ราคา'); const brandIdx = headers.indexOf('ชื่อร้านค้า');
+        const gmvIdx = headers.indexOf('GMV'); const commIdx = headers.indexOf('มาตรฐาน');
+        
+        // คอลัมน์ที่เพิ่มใหม่
+        const orderTypeIdx = headers.indexOf('ประเภทคำสั่งซื้อ');
+        const shopAdsIdx = headers.indexOf('โฆษณาร้านค้า');
 
-        if (idIdx === -1 || gmvIdx === -1) {
-          showToast('หาคอลัมน์ "รหัสสินค้า" หรือ "GMV" ไม่เจอ โปรดเช็คข้อมูล', 'error');
-          setIsProcessing(false); return;
-        }
+        if (idIdx === -1 || gmvIdx === -1) { showToast('หาคอลัมน์ "รหัสสินค้า" หรือ "GMV" ไม่เจอ', 'error'); setIsProcessing(false); return; }
 
         const aggregated = {};
         for (let i = 1; i < rows.length; i++) {
           if (!rows[i].trim()) continue;
           const cols = parseRow(rows[i]).map(c => c.trim().replace(/^"|"$/g, ''));
-          const pId = cols[idIdx];
-          if (!pId) continue;
+          const pId = cols[idIdx]; if (!pId) continue;
           
-          let gmvVal = Number((cols[gmvIdx] || '0').replace(/,/g, ''));
-          if (isNaN(gmvVal)) gmvVal = 0;
+          let gmvVal = Number((cols[gmvIdx] || '0').replace(/,/g, '')); if (isNaN(gmvVal)) gmvVal = 0;
           let priceVal = Number((cols[priceIdx] || '0').replace(/,/g, ''));
           let commVal = cols[commIdx]?.includes('%') ? Number(cols[commIdx].replace('%','')) : 0;
+          
+          // ✅ 3. เช็คสถานะโฆษณาร้านค้า และดึง GMV Max %
+          const isAdsOrder = cols[orderTypeIdx]?.includes('โฆษณาร้านค้า');
+          const rawAdsPct = cols[shopAdsIdx] || '';
+          // ดึงตัวเลขที่มากที่สุดออกมา (เช่น "12%/13%" จะได้ 13)
+          const adsNumbers = rawAdsPct.match(/\d+(\.\d+)?/g);
+          const maxAdsPct = adsNumbers ? Math.max(...adsNumbers.map(Number)) : 0;
 
           if (!aggregated[pId]) {
             aggregated[pId] = {
               tiktokProductId: pId, name: cols[nameIdx] || 'ไม่ระบุชื่อ', brand: cols[brandIdx] || '',
-              price: isNaN(priceVal) ? 0 : priceVal, commission: isNaN(commVal) ? 0 : commVal, totalGmv: 0, orderCount: 0
+              price: isNaN(priceVal) ? 0 : priceVal, commission: isNaN(commVal) ? 0 : commVal, totalGmv: 0, orderCount: 0,
+              isShopAds: false, gmvMaxPct: 0
             };
           }
           aggregated[pId].totalGmv += gmvVal;
           aggregated[pId].orderCount += 1;
+          
+          // อัปเดตสถานะตะกร้าแดงและ % สูงสุดเสมอ
+          if (isAdsOrder) aggregated[pId].isShopAds = true;
+          if (maxAdsPct > aggregated[pId].gmvMaxPct) aggregated[pId].gmvMaxPct = maxAdsPct;
         }
 
         const matched = []; const ghosts = [];
         Object.values(aggregated).forEach(item => {
-          const existing = products.find(p => p.tiktokProductId === item.tiktokProductId);
+          const existing = products.find(p => p.tiktokProductId === item.tiktokProductId || p.id === item.tiktokProductId);
           if (existing) matched.push({ ...item, product: existing });
           else ghosts.push(item);
         });
         
-        matched.sort((a,b) => b.totalGmv - a.totalGmv);
-        ghosts.sort((a,b) => b.totalGmv - a.totalGmv);
+        matched.sort((a,b) => b.totalGmv - a.totalGmv); ghosts.sort((a,b) => b.totalGmv - a.totalGmv);
         setParsedData({ matched, ghosts });
-      } catch (e) {
-        showToast('เกิดข้อผิดพลาดในการอ่านข้อมูล', 'error');
-      }
+      } catch (e) { showToast('เกิดข้อผิดพลาดในการอ่านข้อมูล', 'error'); }
       setIsProcessing(false);
     }, 500);
   };
@@ -1668,50 +1694,88 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
     parsedData.matched.forEach(item => {
       const p = item.product;
       const salesData = p.salesData || {};
-      const new30d = (Number(salesData.last30d) || 0) + item.totalGmv;
-      onUpdateProduct(p.id, { salesData: { ...salesData, last30d: new30d, updatedAt: new Date().toISOString() } });
+      
+      // ✅ 4. อัปเดตยอดเข้าฐานข้อมูลรายเดือน (monthly ledger)
+      const monthlyRecord = salesData.monthly || {};
+      monthlyRecord[selectedMonth] = (monthlyRecord[selectedMonth] || 0) + item.totalGmv;
+      
+      // ถ้าข้อมูลที่อัปโหลดคือ "เดือนปัจจุบัน" ถึงจะไปอัปเดตช่อง last30d เพื่อให้ Dashboard คำนวณเป็นยอด Active
+      const isCurrentMonth = selectedMonth === currentMonth();
+      const new30d = isCurrentMonth ? (Number(salesData.last30d) || 0) + item.totalGmv : salesData.last30d;
+
+      // อัปเดต Shop Ads และ %GMV Max เฉพาะเมื่อระบบเจอค่าที่มากกว่าเดิม
+      const newIsShopAds = p.isShopAds || item.isShopAds;
+      const newGmvMax = Math.max(Number(p.gmvMaxPct) || 0, item.gmvMaxPct);
+
+      onUpdateProduct(p.id, { 
+        isShopAds: newIsShopAds,
+        gmvMaxPct: newGmvMax > 0 ? String(newGmvMax) : (p.gmvMaxPct || ''),
+        salesData: { ...salesData, last30d: new30d, monthly: monthlyRecord, updatedAt: new Date().toISOString() } 
+      });
     });
-    showToast(`ซิงก์ยอดขาย ${parsedData.matched.length} สินค้าเรียบร้อย!`, 'success');
+    showToast(`ซิงก์ยอดขาย ${parsedData.matched.length} สินค้า เข้าบัญชีเดือน ${selectedMonth} เรียบร้อย!`, 'success');
     onClose();
   };
 
   const handleQuickAdd = (ghost) => {
+    const autoType = detectProductType(ghost.name); // 🤖 ให้ AI แยกหมวดสินค้า
+    
+    // ตั้งค่า GMV ลงสมุดบัญชีรายเดือน
+    const monthlyRecord = { [selectedMonth]: ghost.totalGmv };
+    const isCurrentMonth = selectedMonth === currentMonth();
+
     onQuickAdd({
       name: ghost.name, brand: ghost.brand, tiktokProductId: ghost.tiktokProductId, price: ghost.price,
+      isShopAds: ghost.isShopAds, // ✅ ติ๊กตะกร้าแดงอัตโนมัติ
+      gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', // ✅ ใส่ %GMV ให้อัตโนมัติ
+      productType: autoType, // ✅ จัดประเภทสินค้าอัตโนมัติ
       scorecard: { commission: ghost.commission || '' },
-      salesData: { last30d: ghost.totalGmv, last7d: 0, updatedAt: new Date().toISOString() },
-      category: ghost.totalGmv >= 10000 ? 'B' : 'C', productType: 'other'
+      salesData: { last30d: isCurrentMonth ? ghost.totalGmv : 0, monthly: monthlyRecord, last7d: 0, updatedAt: new Date().toISOString() },
+      category: ghost.totalGmv >= 10000 ? 'B' : 'C'
     });
     setParsedData(prev => ({ ...prev, ghosts: prev.ghosts.filter(g => g.tiktokProductId !== ghost.tiktokProductId) }));
   };
 
   const footer = parsedData ? (
     <div className="flex gap-3">
-      <button onClick={() => setParsedData(null)} className="px-5 py-3.5 bg-slate-100 text-slate-700 font-bold rounded-2xl transition-all hover:bg-slate-200">สแกนใหม่</button>
-      <button onClick={handleSyncMatched} disabled={parsedData.matched.length === 0} className="flex-1 bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-3.5 rounded-2xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all"><RefreshCw className="w-5 h-5"/> อัปเดตยอดสินค้าที่พบเข้าคลัง ({parsedData.matched.length} รายการ)</button>
+      <button onClick={() => setParsedData(null)} className="px-5 py-3.5 bg-slate-100 text-slate-700 font-bold rounded-2xl transition-all hover:bg-slate-200">สแกนไฟล์ใหม่</button>
+      <button onClick={handleSyncMatched} disabled={parsedData.matched.length === 0} className="flex-1 bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-3.5 rounded-2xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all"><RefreshCw className="w-5 h-5"/> อัปเดตสมุดบัญชีเข้าคลัง ({parsedData.matched.length} รายการ)</button>
     </div>
   ) : (
-    <button onClick={processData} disabled={!rawData} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md flex items-center justify-center gap-2 disabled:opacity-50 transition-all">{isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5"/>} เริ่มสแกนเรดาร์</button>
+    <button onClick={processData} disabled={!rawData} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md flex items-center justify-center gap-2 disabled:opacity-50 transition-all">{isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5"/>} วิเคราะห์และสแกนข้อมูล</button>
   );
 
   return (
-    <Modal title="📡 สแกนยอดขาย TikTok (CSV Radar)" onClose={onClose} size="xl" footer={footer}>
+    <Modal title="📡 สแกนเรดาร์ยอดขาย TikTok (CSV/Excel)" onClose={onClose} size="xl" footer={footer}>
       {!parsedData ? (
         <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-emerald-50 border border-emerald-100 p-4 rounded-2xl shadow-sm">
+            <div>
+              <div className="text-sm font-bold text-[#012b25] mb-1">เลือกเดือนของข้อมูล (Time Bucket)</div>
+              <div className="text-[10px] text-emerald-700">เพื่อป้องกันยอดตีกัน ระบบจะแยกเก็บประวัติยอดขายตามเดือนที่คุณเลือก</div>
+            </div>
+            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-[#012b25] bg-white border border-emerald-200 px-4 py-2 rounded-xl focus:outline-none cursor-pointer">
+              {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
           <div className="bg-sky-50 border border-sky-100 p-4 rounded-2xl text-xs text-sky-800 leading-relaxed shadow-sm">
             <strong>วิธีใช้งาน:</strong> เปิดหน้าคำสั่งซื้อในแอป TikTok Affiliate &gt; กด Export ข้อมูล &gt; เปิดไฟล์ Excel แล้ว <strong>Copy ข้อมูลตารางมาวาง (Paste) ในช่องด้านล่างนี้ได้เลย</strong> (ไม่ต้องลบหัวตาราง)
           </div>
-          <textarea value={rawData} onChange={(e) => setRawData(e.target.value)} className="w-full h-64 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-[10px] font-mono whitespace-pre focus:outline-none focus:border-[#012b25]/30 focus:ring-2 focus:ring-[#012b25]/10 resize-none" placeholder="คลิกขวา -> Paste ข้อมูลจาก Excel ตรงนี้..."></textarea>
+          <textarea value={rawData} onChange={(e) => setRawData(e.target.value)} className="w-full h-56 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-[10px] font-mono whitespace-pre focus:outline-none focus:border-[#012b25]/30 focus:ring-2 focus:ring-[#012b25]/10 resize-none shadow-inner" placeholder="คลิกขวา -> Paste ข้อมูลดิบจาก Excel ตรงนี้..."></textarea>
         </div>
       ) : (
         <div className="space-y-6">
+          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
+            <div className="text-xs font-bold text-slate-700">กำลังอัปเดตสมุดบัญชียอดขายของเดือน: <span className="text-[#012b25] bg-[#d9eb54] px-2 py-0.5 rounded-md ml-1">{selectedMonth}</span></div>
+            {selectedMonth !== currentMonth() && <div className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md">⚠️ บันทึกย้อนหลัง (ไม่กระทบยอด 30 วันปัจจุบัน)</div>}
+          </div>
           <div>
-            <h3 className="font-display text-base text-[#012b25] mb-3 flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-500" /> 🟢 สแกนเจอในระบบ (พร้อม Auto-Sync) - {parsedData.matched.length} รายการ</h3>
+            <h3 className="font-display text-base text-[#012b25] mb-3 flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-500" /> 🟢 ตรงกันกับในคลัง (Auto-Sync) - {parsedData.matched.length} รายการ</h3>
             <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl overflow-hidden shadow-sm">
-              <div className="max-h-[250px] overflow-y-auto">
-                <table className="w-full text-left text-xs"><thead className="bg-emerald-100/50 sticky top-0"><tr className="font-bold text-emerald-800"><th className="p-3">สินค้าในคลังของเรา</th><th className="p-3 text-right">จำนวนออเดอร์</th><th className="p-3 text-right">+ GMV ที่จะบวกเพิ่ม</th></tr></thead><tbody className="divide-y divide-emerald-50">
+              <div className="max-h-[200px] overflow-y-auto">
+                <table className="w-full text-left text-xs"><thead className="bg-emerald-100/50 sticky top-0"><tr className="font-bold text-emerald-800"><th className="p-3">สินค้าในคลังของเรา</th><th className="p-3 text-right">จำนวนออเดอร์</th><th className="p-3 text-right">+ GMV ({selectedMonth})</th></tr></thead><tbody className="divide-y divide-emerald-50">
                   {parsedData.matched.length === 0 ? <tr><td colSpan="3" className="p-6 text-center text-slate-400 font-medium">ไม่มีข้อมูลยอดขายที่ตรงกับสินค้าในระบบ</td></tr> : parsedData.matched.map((m, i) => (
-                    <tr key={i} className="hover:bg-emerald-50/80"><td className="p-3"><div className="font-semibold text-[#012b25] line-clamp-1">{m.product.name}</div><div className="text-[10px] text-slate-500 font-mono mt-0.5">ID: {m.tiktokProductId}</div></td><td className="p-3 text-right font-mono text-slate-600">{m.orderCount}</td><td className="p-3 text-right font-mono font-bold text-emerald-700">+฿{fmtNum(m.totalGmv)}</td></tr>
+                    <tr key={i} className="hover:bg-emerald-50/80"><td className="p-3"><div className="font-semibold text-[#012b25] line-clamp-1">{m.product.name}</div><div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-2"><span>ID: {m.tiktokProductId}</span>{m.isShopAds && <span className="bg-rose-100 text-rose-700 px-1 rounded font-bold font-sans">🛒 Ads {m.gmvMaxPct ? `${m.gmvMaxPct}%` : ''}</span>}</div></td><td className="p-3 text-right font-mono text-slate-600">{m.orderCount}</td><td className="p-3 text-right font-mono font-bold text-emerald-700">+฿{fmtNum(m.totalGmv)}</td></tr>
                   ))}
                 </tbody></table>
               </div>
@@ -1720,15 +1784,15 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
           <div>
             <h3 className="font-display text-base text-rose-800 mb-3 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-rose-500" /> 👻 สินค้าตกสำรวจ (Ghost Items) - {parsedData.ghosts.length} รายการ</h3>
             <div className="bg-rose-50/50 border border-rose-100 rounded-2xl overflow-hidden shadow-sm">
-              <div className="max-h-[250px] overflow-y-auto">
+              <div className="max-h-[220px] overflow-y-auto">
                 <table className="w-full text-left text-xs"><thead className="bg-rose-100/50 sticky top-0"><tr className="font-bold text-rose-800"><th className="p-3">สินค้าที่ AI เจอในไฟล์</th><th className="p-3 text-right">ออเดอร์</th><th className="p-3 text-right">GMV รวม</th><th className="p-3 text-right">ดำเนินการ</th></tr></thead><tbody className="divide-y divide-rose-50">
                   {parsedData.ghosts.length === 0 ? <tr><td colSpan="4" className="p-6 text-center text-slate-400 font-medium">สุดยอด! ไม่มีสินค้าไหนรอดสายตาคุณไปได้เลย</td></tr> : parsedData.ghosts.map((g, i) => (
-                    <tr key={i} className="hover:bg-rose-50/80"><td className="p-3"><div className="font-semibold text-rose-900 line-clamp-1">{g.name}</div><div className="text-[10px] text-rose-600/70 font-mono mt-0.5">{g.brand} · คอม ≈{g.commission}%</div></td><td className="p-3 text-right font-mono text-rose-800">{g.orderCount}</td><td className="p-3 text-right font-mono font-bold text-rose-700">฿{fmtNum(g.totalGmv)}</td><td className="p-3 text-right"><button onClick={() => handleQuickAdd(g)} className="bg-[#012b25] text-[#d9eb54] px-4 py-2 rounded-xl font-bold hover:bg-[#033c32] shadow-sm transition-all">+ ดึงเข้าพอร์ต</button></td></tr>
+                    <tr key={i} className="hover:bg-rose-50/80"><td className="p-3"><div className="font-semibold text-rose-900 line-clamp-1">{g.name}</div><div className="text-[10px] text-rose-600/70 mt-1 flex items-center gap-1.5 flex-wrap"><span className="bg-white px-1.5 py-0.5 border border-rose-200 rounded-md font-bold">{detectProductType(g.name).toUpperCase()}</span><span>{g.brand}</span><span className="font-mono">· คอม ≈{g.commission}%</span>{g.isShopAds && <span className="bg-rose-100 text-rose-700 px-1 rounded font-bold font-sans">🛒 Ads {g.gmvMaxPct ? `${g.gmvMaxPct}%` : ''}</span>}</div></td><td className="p-3 text-right font-mono text-rose-800">{g.orderCount}</td><td className="p-3 text-right font-mono font-bold text-rose-700">฿{fmtNum(g.totalGmv)}</td><td className="p-3 text-right"><button onClick={() => handleQuickAdd(g)} className="bg-[#012b25] text-[#d9eb54] px-4 py-2 rounded-xl font-bold hover:bg-[#033c32] shadow-sm transition-all">+ ดึงเข้าพอร์ต</button></td></tr>
                   ))}
                 </tbody></table>
               </div>
             </div>
-            <p className="text-[10px] font-bold text-slate-500 mt-3 ml-2 flex items-center gap-1"><Lightbulb className="w-3 h-3 text-amber-500"/> การกด "+ ดึงเข้าพอร์ต" ระบบจะสร้างการ์ดสินค้าตัวใหม่ให้ทันที (คุณสามารถไปตั้งหมวด ABCD ได้ภายหลัง)</p>
+            <p className="text-[10px] font-bold text-slate-500 mt-3 ml-2 flex items-center gap-1"><Sparkles className="w-3 h-3 text-amber-500"/> ถ้าระบุว่าเป็นข้อมูลของเดือนอดีต ยอดขายจะไปบันทึกไว้ในสมุดบัญชี (History) แต่จะไม่นำมาแสดงหลอกตาในช่อง 30 วันปัจจุบันครับ</p>
           </div>
         </div>
       )}
