@@ -1361,6 +1361,10 @@ const inputStyles = "w-full px-4 py-3 bg-[#f3f6f5] border border-transparent rou
 function AddProductModal({ onClose, onSave, showToast }) {
   const [name, setName] = useState(''); const [brand, setBrand] = useState('');
   const [category, setCategory] = useState('A'); const [productType, setProductType] = useState('supplement');
+  
+  // ✅ 1. เพิ่ม State สำหรับเก็บรหัส TikTok Product ID
+  const [tiktokProductId, setTiktokProductId] = useState('');
+
   const [tiktokLink, setTiktokLink] = useState(''); const [kalodataLink, setKalodataLink] = useState('');
   const [gmvMaxPct, setGmvMaxPct] = useState(''); const [pillars, setPillars] = useState([]);
   const [tiktokRank, setTiktokRank] = useState(''); const [price, setPrice] = useState('');
@@ -1375,7 +1379,9 @@ function AddProductModal({ onClose, onSave, showToast }) {
     if (!name) return showToast('กรุณาระบุชื่อสินค้าก่อน', 'error');
     if (!usedReal || !scopeOK) { if (!window.confirm('⚠️ ข้ามมาตรการ 2-Rules Gate ยืนยันบันทึกต่อหรือไม่?')) return; }
     const salesData = (sales7d || sales30d) ? { last7d: Number(sales7d) || 0, last30d: Number(sales30d) || 0, updatedAt: new Date().toISOString() } : null;
-    onSave({ name, brand, category, productType, tiktokLink, kalodataLink, gmvMaxPct, pillars, scorecard: sc, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, salesData, isShopAds, usedReal, scopeOK });
+    
+    // ✅ 2. ส่ง tiktokProductId ไปบันทึกลง Cloud ด้วย
+    onSave({ name, brand, category, productType, tiktokLink, kalodataLink, gmvMaxPct, pillars, scorecard: sc, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, salesData, isShopAds, usedReal, scopeOK, tiktokProductId });
     onClose();
   };
 
@@ -1385,8 +1391,17 @@ function AddProductModal({ onClose, onSave, showToast }) {
     <Modal title="📦 เพิ่มสินค้าใหม่เข้าพอร์ต" onClose={onClose} size="lg" footer={footer}>
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4 shadow-sm"><div className="text-xs font-bold text-amber-900 mb-2 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> 2-Rules Gate เช็คความเสี่ยง</div><label className="flex items-start gap-2 text-xs cursor-pointer mb-2"><input type="checkbox" checked={usedReal} onChange={e => setUsedReal(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[#012b25] rounded" /><span><strong>ใช้จริงแล้ว</strong> หรือ First Impression</span></label><label className="flex items-start gap-2 text-xs cursor-pointer"><input type="checkbox" checked={scopeOK} onChange={e => setScopeOK(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[#012b25] rounded" /><span><strong>อยู่ใน Scope</strong> ของช่อง</span></label></div>
       <FormField label="ชื่อสินค้า *"><input value={name} onChange={e => setName(e.target.value)} autoFocus className={inputStyles} placeholder="เช่น Oxyflow รองเท้า" /></FormField>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3"><FormField label="แบรนด์ / ร้านค้า"><input value={brand} onChange={e => setBrand(e.target.value)} className={inputStyles} placeholder="ชื่อแบรนด์" /></FormField><FormField label="ประเภทผลิตภัณฑ์"><div className="grid grid-cols-2 gap-2">{PRODUCT_TYPES.slice(0, 4).map(t => (<button key={t.id} onClick={() => setProductType(t.id)} className={`text-[10px] font-bold p-3 rounded-xl border transition-all text-left truncate ${productType === t.id ? 'bg-[#012b25] text-white border-[#012b25] shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{t.emoji} {t.label}</button>))}</div></FormField></div>
-      <FormField><label className="flex items-center gap-3 cursor-pointer p-4 bg-rose-50/50 border border-rose-100 rounded-2xl hover:bg-rose-50 transition-all"><input type="checkbox" checked={isShopAds} onChange={e => setIsShopAds(e.target.checked)} className="w-5 h-5 text-rose-600 rounded accent-rose-600" /><span className="text-sm text-rose-900">🛒 <strong>ตะกร้าแดง (Shop Ads)</strong> — มี GMV Max โชว์ในแอป</span></label></FormField>
+      
+      {/* ✅ 3. เพิ่มช่องกรอกรหัส TikTok ตรงนี้ */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+        <FormField label="แบรนด์ / ร้านค้า"><input value={brand} onChange={e => setBrand(e.target.value)} className={inputStyles} placeholder="ชื่อแบรนด์" /></FormField>
+        <FormField label="🔗 รหัสสินค้า TikTok (Product ID) 🔑" hint="ตัวเลข 19 หลัก จากแอป (เว้นว่างไว้สแกนหาทีหลังได้)">
+          <input value={tiktokProductId} onChange={e => setTiktokProductId(e.target.value.replace(/\D/g, ''))} className={`${inputStyles} font-mono font-bold text-sky-700 bg-sky-50 focus:bg-white border-sky-100`} placeholder="เช่น 173126537522..." />
+        </FormField>
+      </div>
+
+      <FormField label="ประเภทผลิตภัณฑ์"><div className="grid grid-cols-2 md:grid-cols-4 gap-2">{PRODUCT_TYPES.slice(0, 4).map(t => (<button key={t.id} onClick={() => setProductType(t.id)} className={`text-[11px] font-bold p-3 rounded-xl border transition-all text-left truncate ${productType === t.id ? 'bg-[#012b25] text-white border-[#012b25] shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{t.emoji} {t.label}</button>))}</div></FormField>
+      <FormField><label className="flex items-center gap-3 cursor-pointer p-4 bg-rose-50/50 border border-rose-100 rounded-2xl hover:bg-rose-50 transition-all"><input type="checkbox" checked={isShopAds} onChange={e => setIsShopAds(e.target.checked)} className="w-5 h-5 text-rose-600 rounded accent-rose-600 bg-white" /><span className="text-sm font-semibold text-rose-900">🛒 <strong>ตะกร้าแดง (Shop Ads)</strong> — มี GMV Max โชว์ในแอป</span></label></FormField>
       <FormField label="จัดหมวด ABCD">
         {(sales30d || sc.commission || tiktokRank) && (<div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 mb-4 text-xs shadow-sm"><div className="font-bold text-purple-900 mb-1 flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> AI แนะนำหมวด: <span className="text-base ml-1">{suggestion.label}</span></div><div className="text-purple-700/80 mb-3">{suggestion.reason}</div>{category !== suggestion.cat && <button onClick={() => setCategory(suggestion.cat)} className="text-[10px] font-bold bg-purple-600 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-purple-700">ประทับตราหมวด {suggestion.cat}</button>}</div>)}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{Object.entries(ABCD_INFO).filter(([k]) => k !== 'V').map(([k, info]) => (<button key={k} onClick={() => setCategory(k)} className={`p-4 text-left rounded-2xl border transition-all ${category === k ? `${info.bg} text-white shadow-md border-transparent` : 'bg-white border-slate-200 hover:bg-slate-50'}`}><div className="font-bold text-sm">{info.label}</div><div className={`text-[10px] mt-1 ${category === k ? 'text-white/80' : 'text-slate-400'}`}>{info.desc}</div></button>))}</div>
@@ -1401,6 +1416,10 @@ function AddProductModal({ onClose, onSave, showToast }) {
 function EditProductInfoModal({ product, onClose, onSave }) {
   const [name, setName] = useState(product?.name || ''); const [brand, setBrand] = useState(product?.brand || '');
   const [productType, setProductType] = useState(product?.productType || 'supplement');
+  
+  // ✅ 4. ดึงค่า TikTok ID เดิมมาโชว์ (ถ้าเคยกรอกไว้แล้ว)
+  const [tiktokProductId, setTiktokProductId] = useState(product?.tiktokProductId || ''); 
+  
   const [tiktokLink, setTiktokLink] = useState(product?.tiktokLink || ''); const [kalodataLink, setKalodataLink] = useState(product?.kalodataLink || '');
   const [tiktokRank, setTiktokRank] = useState(product?.tiktokRank || ''); const [price, setPrice] = useState(product?.price || '');
   const [isShopAds, setIsShopAds] = useState(!!product?.isShopAds);
@@ -1410,14 +1429,24 @@ function EditProductInfoModal({ product, onClose, onSave }) {
   
   const handleSave = () => {
     const salesData = (sales7d || sales30d) ? { last7d: Number(sales7d) || 0, last30d: Number(sales30d) || 0, updatedAt: new Date().toISOString() } : product.salesData;
-    onSave({ name, brand, productType, tiktokLink, kalodataLink, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, isShopAds, salesData });
+    // ✅ 5. ส่ง tiktokProductId อัปเดตขึ้น Cloud
+    onSave({ name, brand, productType, tiktokProductId, tiktokLink, kalodataLink, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, isShopAds, salesData });
   };
   
   const footer = (<button onClick={handleSave} className="w-full bg-[#012b25] text-white hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2"><Edit3 className="w-4 h-4"/> อัปเดตข้อมูลสเปกสินค้า</button>);
   
   return (
     <Modal title="⚙️ แก้ไขข้อมูล (Info)" onClose={onClose} size="lg" footer={footer}>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3"><FormField label="ชื่อสินค้า"><input value={name} onChange={e => setName(e.target.value)} className={inputStyles} /></FormField><FormField label="แบรนด์"><input value={brand} onChange={e => setBrand(e.target.value)} className={inputStyles} /></FormField></div>
+      <FormField label="ชื่อสินค้า"><input value={name} onChange={e => setName(e.target.value)} className={inputStyles} /></FormField>
+      
+      {/* ✅ 6. ช่องแก้ไขรหัส TikTok */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+        <FormField label="แบรนด์"><input value={brand} onChange={e => setBrand(e.target.value)} className={inputStyles} /></FormField>
+        <FormField label="🔗 รหัสสินค้า TikTok (Product ID) 🔑" hint="รหัสสินค้า 19 หลักสำหรับเชื่อม Auto-Sync GMV">
+          <input value={tiktokProductId} onChange={e => setTiktokProductId(e.target.value.replace(/\D/g, ''))} className={`${inputStyles} font-mono font-bold text-sky-700 bg-sky-50 border-sky-100 focus:bg-white`} placeholder="เช่น 1732082829043..." />
+        </FormField>
+      </div>
+
       <FormField label="ประเภทผลิตภัณฑ์"><div className="grid grid-cols-2 md:grid-cols-4 gap-2">{PRODUCT_TYPES.slice(0,4).map(t => (<button key={t.id} onClick={() => setProductType(t.id)} className={`text-[11px] p-3.5 rounded-2xl border transition-all text-left font-bold ${productType === t.id ? 'bg-[#012b25] text-white border-[#012b25] shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{t.emoji} {t.label}</button>))}</div></FormField>
       <FormField><label className="flex items-center gap-3 cursor-pointer p-4 bg-rose-50/50 border border-rose-100 rounded-2xl hover:bg-rose-50 transition-all"><input type="checkbox" checked={isShopAds} onChange={e => setIsShopAds(e.target.checked)} className="w-5 h-5 accent-rose-600 rounded bg-white" /><span className="text-sm font-semibold text-rose-900">🛒 <strong>ตะกร้าแดง (Shop Ads)</strong> — มีป้ายบอกระดับในแอป</span></label></FormField>
       <div className="grid grid-cols-2 gap-3"><FormField label="💰 ราคาขาย (฿)"><input type="number" step="0.01" min="0" value={price} onChange={e => setPrice(e.target.value)} className={`${inputStyles} font-mono font-bold text-emerald-700`} /></FormField><FormField label="🏆 TikTok Rank"><input type="number" min="1" value={tiktokRank} onChange={e => setTiktokRank(e.target.value)} className={`${inputStyles} font-mono font-bold text-rose-600`} /></FormField></div>
