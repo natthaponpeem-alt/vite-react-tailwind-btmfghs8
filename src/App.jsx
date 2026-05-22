@@ -137,13 +137,11 @@ function getProductSales(product, clips, timeframe) {
   if (!product) return { fromClips: 0, fromManual: 0, hasManual: false, clipCount: 0, primary: 0 }; 
   let fromClips = 0, clipCount = 0, fromManual = 0; 
   if (typeof timeframe === 'string' && timeframe.includes('-')) { 
-    // ⏳ กรณีเลือกดึงจากสมุดบัญชีรายเดือน (เช่น 2026-04)
     const pclips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && c.postedAt?.slice(0, 7) === timeframe) : []; 
     fromClips = pclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); 
     clipCount = pclips.length; 
     fromManual = Number(product.salesData?.monthly?.[timeframe]) || 0; 
   } else { 
-    // ⏳ กรณีดึงจากช่วงวันล่าสุด (7, 30, 90 วัน)
     const days = Number(timeframe) || 30; 
     const cutoff = Date.now() - days * 86400000; 
     const pclips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff) : []; 
@@ -372,7 +370,7 @@ export default function App() {
 
   const selectedProduct = selectedProductId ? products.find(p => p.id === selectedProductId) : null;
   const lockedProducts = useMemo(() => products.filter(p => p.locked && p.locked.month === currentMonth()), [products]);
-  const productsNeedingRescore = useMemo(() => products.filter(p => daysSince(p.lastScoredAt) >= RESCORE_DAYS), [products]);
+  const productsNeedingRescore = useMemo(() => products.filter(p => !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS), [products]);
   const last7DaysClips = useMemo(() => {
     const cutoff = Date.now() - 7 * 86400000;
     return clips.filter(c => new Date(c.postedAt).getTime() >= cutoff).sort((a, b) => new Date(a.postedAt) - new Date(b.postedAt));
@@ -700,6 +698,30 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         <OverviewKPI icon={Activity} label="Total Clips" value={clips.length} sub="คลิปสะสมทั้งหมดในระบบ" />
       </div>
 
+      {/* ⚠️ สินค้าครบกำหนดคัดกรองคะแนน (Rescore Alert) */}
+      {productsNeedingRescore && productsNeedingRescore.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div>
+          <div className="flex items-center justify-between ml-2">
+            <div className="flex items-center gap-2 text-amber-900 font-bold">
+              <Clock className="w-5 h-5 text-amber-600" />
+              <h3 className="font-display text-base">รายการสินค้าที่ต้องประเมินคะแนน (NEW & Stale)</h3>
+              <span className="bg-amber-200 text-amber-800 text-[10px] px-2 py-0.5 rounded-full">{productsNeedingRescore.length} รายการ</span>
+            </div>
+            <button onClick={() => onGoTo('products')} className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-sm hidden sm:block">ไปจัดการ</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 ml-2">
+            {productsNeedingRescore.slice(0, 8).map(p => (
+              <div key={p.id} onClick={() => onSelectProduct(p.id)} className="bg-white border border-amber-100 p-3 rounded-2xl cursor-pointer hover:shadow-md hover:border-amber-300 transition-all flex items-center justify-between group">
+                <div className="truncate text-sm font-semibold text-slate-800 pr-2 group-hover:text-amber-700 transition-colors">{p.name}</div>
+                <div className={`text-[10px] px-2 py-1 rounded-lg font-bold whitespace-nowrap flex-shrink-0 ${!p.lastScoredAt ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-800'}`}>{!p.lastScoredAt ? 'NEW' : `${daysSince(p.lastScoredAt)} วัน`}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm xl:col-span-2 space-y-4">
           <div className="flex items-center justify-between"><div><h3 className="font-display text-lg text-[#012b25]">Sales Analytics</h3><p className="text-xs text-slate-400">ประเมินสถิติแรงกระตุ้นยอดขายคลิป</p></div></div>
@@ -838,15 +860,14 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all'); const [sortBy, setSortBy] = useState('score');
   
-  // ✅ ระบบจำค่ามุมมอง (Local Storage)
   const [viewMode, setViewMode] = useState(() => { try { return localStorage.getItem('peem6pack_viewMode') || 'box'; } catch { return 'box'; } });
   useEffect(() => { try { localStorage.setItem('peem6pack_viewMode', viewMode); } catch {} }, [viewMode]);
 
   const filtered = useMemo(() => {
     let list = products.filter(p => {
-      // ✅ แก้บั๊ก Filter ให้เช็คเงื่อนไขร่วมกันได้ (AND Logic)
+      const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
       if (search && !p.name?.toLowerCase().includes(search.toLowerCase())) return false;
-      if (filter === 'stale' && daysSince(p.lastScoredAt) < RESCORE_DAYS) return false;
+      if (filter === 'stale' && !isStale) return false;
       if (['PICK', 'WAIT', 'DROP'].includes(filter.toUpperCase()) && p.decision?.toUpperCase() !== filter.toUpperCase()) return false;
       if (filter === 'locked' && !p.locked) return false;
       if (['A', 'B', 'C', 'D'].includes(filter) && p.category !== filter) return false;
@@ -855,17 +876,19 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
     });
     
     if (sortBy === 'score') list.sort((a, b) => (b.scorePct || 0) - (a.scorePct || 0));
-    else if (sortBy === 'rescore') list.sort((a, b) => daysSince(b.lastScoredAt) - daysSince(a.lastScoredAt));
+    else if (sortBy === 'rescore') list.sort((a, b) => daysSince(b.lastScoredAt || 0) - daysSince(a.lastScoredAt || 0));
     else if (sortBy === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
     else if (sortBy === 'created') list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return list;
   }, [products, search, filter, typeFilter, sortBy]);
 
+  const staleProducts = products.filter(p => !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS);
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Products</span><div className="font-display text-2xl text-[#012b25] mt-1">{products.length}</div></div><div className="p-3 bg-slate-50 text-slate-400 rounded-2xl"><Package className="w-5 h-5" /></div></div>
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Low Stock / Stale</span><div className="font-display text-2xl text-amber-600 mt-1">{products.filter(p=>daysSince(p.lastScoredAt) >= RESCORE_DAYS).length}</div></div><div className="p-3 bg-amber-50 text-amber-500 rounded-2xl"><AlertTriangle className="w-5 h-5" /></div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-amber-100 transition-colors" onClick={() => setFilter('stale')}><div><span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider block">Low Stock / Stale</span><div className="font-display text-2xl text-amber-600 mt-1">{staleProducts.length} <span className="text-xs font-sans text-amber-500">ชิ้น</span></div></div><div className="p-3 bg-white/50 text-amber-500 rounded-2xl"><AlertTriangle className="w-5 h-5" /></div></div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Drop Items</span><div className="font-display text-2xl text-[#dc2626] mt-1">{products.filter(p=>p.decision === 'DROP').length}</div></div><div className="p-3 bg-rose-50 text-rose-500 rounded-2xl"><X className="w-5 h-5" /></div></div>
       </div>
 
@@ -889,16 +912,41 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
         ) : viewMode === 'box' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 pt-2">
             {filtered.map(p => {
-              const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category); const isStale = daysSince(p.lastScoredAt) >= RESCORE_DAYS;
+              const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category); 
+              const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
+              const comm = p.scorecard?.commission || 0;
+              const trend = p.scorecard?.gmv30dPct || '';
+              const trendIsUp = Number(trend) > 0;
+
               return (
-                <div key={p.id} onClick={() => onSelect(p.id)} className={`bg-white border ${isStale ? 'border-amber-300 shadow-sm shadow-amber-50' : 'border-slate-100'} rounded-3xl p-5 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between relative group`}>
+                <div key={p.id} onClick={() => onSelect(p.id)} className={`bg-white border ${isStale ? 'border-amber-400 shadow-sm shadow-amber-100' : 'border-slate-100'} rounded-3xl p-5 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between relative group`}>
+                  {isStale && <div className="absolute -top-3 -right-2 bg-amber-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-full shadow-lg border-2 border-white flex items-center gap-1.5 z-10"><Clock className="w-3.5 h-3.5 animate-pulse"/> ประเมิน!</div>}
                   {p.locked && <div className="absolute top-4 right-4 text-[#012b25] bg-lime-400/20 p-1.5 rounded-full border border-lime-400/20"><Lock className="w-3.5 h-3.5" /></div>}
                   <div>
-                    <div className="flex items-center gap-1.5 mb-3 flex-wrap"><div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>{p.isShopAds && <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded-md">🛒 Ads</span>}{p.price > 0 && <span className="text-[9px] bg-slate-100 text-slate-600 font-semibold font-mono px-1.5 py-0.5 rounded-md">฿{fmtNum(p.price)}</span>}{isStale && <span className="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.5 rounded-md">Stale</span>}</div>
+                    <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                      <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                      {p.isShopAds && <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded-md border border-rose-100">🛒 Ads</span>}
+                      {p.price > 0 && <span className="text-[9px] bg-slate-100 text-slate-600 font-semibold font-mono px-1.5 py-0.5 rounded-md">฿{fmtNum(p.price)}</span>}
+                    </div>
                     <h3 className="font-display text-base text-slate-800 line-clamp-2 group-hover:text-emerald-950 transition-colors leading-tight">{p.name || 'ไม่ระบุชื่อ'}</h3>
-                    <p className="text-xs text-slate-400 mt-1">{p.brand || 'No brand'}</p>
+                    <p className="text-xs text-slate-400 mt-1 truncate">{p.brand || 'No brand'}</p>
                   </div>
-                  <div className="mt-5 pt-4 border-t border-slate-50 flex items-end justify-between"><div><div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Argoon Score</div><div className="font-mono font-bold text-sm text-slate-800 mt-0.5">{p.score}/{p.maxScore} <span className="text-xs text-slate-400 font-normal">({p.scorePct}%)</span></div></div><div className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${dec.bg} ${dec.text}`}>{dec.label}</div></div>
+                  
+                  {/* ✅ แผงเพิ่ม Comm และ Trend ในโหมด Box */}
+                  <div className="mt-4 flex items-center gap-4 text-xs font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Comm.</span><span className="font-bold text-violet-700">{comm > 0 ? `${comm}%` : '-'}</span></div>
+                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Trend 30d</span><span className={`font-bold ${trend !== '' ? (trendIsUp ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-600'}`}>{trend !== '' ? `${trendIsUp ? '+' : ''}${trend}%` : '-'}</span></div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-slate-50 flex items-end justify-between">
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Argoon Score</div>
+                      <div className={`font-mono font-bold text-sm mt-0.5 ${!p.lastScoredAt ? 'text-amber-500' : 'text-slate-800'}`}>
+                        {!p.lastScoredAt ? 'PENDING' : `${p.score}/${p.maxScore}`} <span className="text-xs text-slate-400 font-normal">{!p.lastScoredAt ? '' : `(${p.scorePct}%)`}</span>
+                      </div>
+                    </div>
+                    <div className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${dec.bg} ${dec.text}`}>{dec.label}</div>
+                  </div>
                 </div>
               );
             })}
@@ -906,17 +954,45 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
         ) : (
           <div className="overflow-x-auto pt-2">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
-              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
+              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4 text-center">Comm %</th><th className="p-4 text-center">Trend 30d</th><th className="p-4 text-center">Score</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map(p => {
                   const clipCount = clips.filter(c => c.productId === p.id).length; const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category);
+                  const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
+                  const comm = Number(p.scorecard?.commission) || 0;
+                  const trend = p.scorecard?.gmv30dPct;
+                  const trendIsUp = Number(trend) > 0;
+
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50/50 group">
-                      <td className="p-4"><div className="flex items-center gap-3"><div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div><div className="truncate max-w-[200px]"><span className="font-display font-bold text-slate-800 text-sm group-hover:text-emerald-950 block">{p.name || '-'}</span><span className="text-[10px] text-slate-400">{p.brand || '-'}</span></div></div></td>
+                    <tr key={p.id} className={`hover:bg-slate-50/50 group transition-colors ${isStale ? 'bg-amber-50/30' : ''}`}>
+                      <td className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="relative">
+                            <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                            {isStale && <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-white animate-pulse"></div>}
+                          </div>
+                          <div className="truncate max-w-[200px] xl:max-w-[300px]">
+                            <span className={`font-display font-bold text-sm group-hover:text-emerald-950 block truncate ${isStale ? 'text-amber-900' : 'text-slate-800'}`}>{p.name || '-'}</span>
+                            <span className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">{p.brand || '-'} {p.isShopAds && <span className="text-rose-500 font-bold ml-1">· 🛒 Ads</span>}</span>
+                          </div>
+                        </div>
+                      </td>
                       <td className="p-4 font-mono font-bold text-slate-700">{clipCount}</td>
                       <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
+                      <td className="p-4 text-center font-mono font-bold text-violet-700 bg-violet-50/30 rounded-lg">{comm > 0 ? `${comm}%` : '-'}</td>
+                      <td className="p-4 text-center font-mono font-bold">
+                        {trend ? (
+                          <span className={`flex items-center justify-center gap-1 ${trendIsUp ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {trendIsUp ? <TrendingUp className="w-3 h-3"/> : <TrendingDown className="w-3 h-3"/>} {trend}%
+                          </span>
+                        ) : '-'}
+                      </td>
+                      <td className="p-4 text-center">
+                        <div className={`font-mono font-bold text-xs ${!p.lastScoredAt ? 'text-amber-500' : 'text-slate-800'}`}>{!p.lastScoredAt ? 'PENDING' : `${p.score}/${p.maxScore || 18}`}</div>
+                        {p.lastScoredAt && <div className="text-[9px] text-slate-400 font-medium">{p.scorePct}%</div>}
+                      </td>
                       <td className="p-4"><span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${dec.bg} ${dec.text}`}>{dec.label}</span></td>
-                      <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-[#f3f6f5] hover:bg-[#012b25] hover:text-white px-4 py-2 rounded-full font-bold transition-all">แก้ไข</button></td>
+                      <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-white border border-slate-200 hover:border-[#012b25] hover:text-[#012b25] px-4 py-2 rounded-xl font-bold transition-all shadow-sm">แก้ไข</button></td>
                     </tr>
                   );
                 })}
@@ -1929,20 +2005,16 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
     const monthlyRecord = { [selectedMonth]: ghost.totalGmv };
     const isCurrentMonth = selectedMonth === currentMonth();
 
-    // ✅ 5. คำนวณ Argoon Score ตั้งแต่ตอนดึงเข้าพอร์ตครั้งแรก (ไม่เป็นค่าว่างอีกต่อไป)
-    const initialScorecard = { commission: ghost.commission > 0 ? String(ghost.commission) : '' };
-    const s = calcScore(initialScorecard);
-
     onQuickAdd({
       name: ghost.name, brand: ghost.brand, tiktokProductId: ghost.tiktokProductId, price: ghost.price,
-      isShopAds: ghost.isShopAds, // ติ๊กตะกร้าแดง
-      gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', // ยัด %GMV Max
+      isShopAds: ghost.isShopAds, 
+      gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', 
       productType: autoType, 
-      scorecard: initialScorecard,
-      score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct), // จัดคะแนนตั้งต้น
+      scorecard: { commission: ghost.commission > 0 ? String(ghost.commission) : '' },
+      score: 0, maxScore: 18, scorePct: 0, decision: 'WAIT', // 👈 ให้คะแนนเป็นศูนย์เพื่อรอการประเมิน
       salesData: { last30d: isCurrentMonth ? ghost.totalGmv : 0, monthly: monthlyRecord, last7d: 0, updatedAt: new Date().toISOString() },
       category: ghost.totalGmv >= 10000 ? 'B' : 'C',
-      lastScoredAt: new Date().toISOString()
+      lastScoredAt: null // 👈 ตั้งเป็น null เพื่อให้เด้งไปเข้าคิว PENDING / Stale ทันที
     });
     setParsedData(prev => ({ ...prev, ghosts: prev.ghosts.filter(g => g.tiktokProductId !== ghost.tiktokProductId) }));
   };
