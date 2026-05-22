@@ -153,7 +153,9 @@ export default function App() {
   
   const [products, setProducts] = useState([]);
   const [clips, setClips] = useState([]);
-  const [appSettings, setAppSettings] = useState({ monthlyTarget: DEFAULT_MONTHLY_CLIP_TARGET, noticeBoard: '' });
+  const [appSettings, setAppSettings] = useState({ monthlyTarget: DEFAULT_MONTHLY_CLIP_TARGET, noticeBoard: '', monthlyRevenueTarget: 300000 });
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
+  const [importStats, setImportStats] = useState({ products: 0, clips: 0 });
   
   const [toast, setToast] = useState(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -300,16 +302,20 @@ export default function App() {
       try {
         const data = JSON.parse(ev.target.result);
         if (data.products && data.clips) {
-           showToast('กำลังย้ายข้อมูลขึ้นระบบ Subcollections...', 'success');
+           showToast('กำลังซิงค์ไฟล์ข้อมูลขึ้น Cloud...', 'success');
            const newP = data.products.map(migrateProduct);
            const newC = data.clips.map(migrateClip);
            for (const p of newP) await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', p.id), sanitizeForFirestore(p));
            for (const c of newC) await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id), sanitizeForFirestore(c));
-           showToast('Import ข้อมูลขึ้นคลาวด์สำเร็จแล้ว!', 'success');
+           
+           setImportStats({ products: newP.length, clips: newC.length });
+           setShowImportSuccess(true);
+           if (showSettings) setShowSettings(false); 
         }
       } catch { showToast('ไฟล์ JSON ผิดพลาด', 'error'); }
     };
     reader.readAsText(file);
+    e.target.value = null; 
   };
 
   const selectedProduct = selectedProductId ? products.find(p => p.id === selectedProductId) : null;
@@ -409,7 +415,7 @@ export default function App() {
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
-          {page === 'analytics' && (<DashboardView products={products} clips={clips} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
+          {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}/>)}
           {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} />)}
         </div>
       </main>
@@ -456,6 +462,21 @@ export default function App() {
         </div>
       )}
 
+      {showImportSuccess && (
+        <div className="fixed inset-0 bg-[#012b25]/90 backdrop-blur-sm z-[80] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-4 shadow-2xl border border-emerald-100">
+            <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-2 border-4 border-emerald-100">
+              <CheckCircle2 className="w-10 h-10" />
+            </div>
+            <h3 className="font-display text-2xl text-[#012b25]">โหลดข้อมูลสำเร็จ!</h3>
+            <p className="text-sm text-slate-500 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-100">กู้คืนสินค้า <strong className="text-emerald-700">{importStats.products}</strong> รายการ <br/>และคลิปประวัติ <strong className="text-emerald-700">{importStats.clips}</strong> คลิป <br/>เข้าสู่ระบบ Cloud สมบูรณ์แล้ว</p>
+            <div className="pt-4">
+              <button onClick={() => setShowImportSuccess(false)} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] py-4 rounded-2xl font-bold text-sm shadow-lg transition-all">รับทราบ พร้อมทำงาน!</button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {confirmClearDb && (
         <div className="fixed inset-0 bg-rose-950/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-4 shadow-2xl">
@@ -752,18 +773,23 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 function ProductHubPage({ products, clips, onAdd, onSelect }) {
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all'); const [sortBy, setSortBy] = useState('score');
-  const [viewMode, setViewMode] = useState('box');
+  
+  // ✅ ระบบจำค่ามุมมอง (Local Storage)
+  const [viewMode, setViewMode] = useState(() => { try { return localStorage.getItem('peem6pack_viewMode') || 'box'; } catch { return 'box'; } });
+  useEffect(() => { try { localStorage.setItem('peem6pack_viewMode', viewMode); } catch {} }, [viewMode]);
 
   const filtered = useMemo(() => {
     let list = products.filter(p => {
+      // ✅ แก้บั๊ก Filter ให้เช็คเงื่อนไขร่วมกันได้ (AND Logic)
       if (search && !p.name?.toLowerCase().includes(search.toLowerCase())) return false;
-      if (filter === 'stale') return daysSince(p.lastScoredAt) >= RESCORE_DAYS;
-      if (['PICK', 'WAIT', 'DROP'].includes(filter.toUpperCase())) return p.decision?.toUpperCase() === filter.toUpperCase();
-      if (filter === 'locked') return !!p.locked;
-      if (['A', 'B', 'C', 'D'].includes(filter)) return p.category === filter;
+      if (filter === 'stale' && daysSince(p.lastScoredAt) < RESCORE_DAYS) return false;
+      if (['PICK', 'WAIT', 'DROP'].includes(filter.toUpperCase()) && p.decision?.toUpperCase() !== filter.toUpperCase()) return false;
+      if (filter === 'locked' && !p.locked) return false;
+      if (['A', 'B', 'C', 'D'].includes(filter) && p.category !== filter) return false;
       if (typeFilter !== 'all' && p.productType !== typeFilter) return false;
       return true;
     });
+    
     if (sortBy === 'score') list.sort((a, b) => (b.scorePct || 0) - (a.scorePct || 0));
     else if (sortBy === 'rescore') list.sort((a, b) => daysSince(b.lastScoredAt) - daysSince(a.lastScoredAt));
     else if (sortBy === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
@@ -1113,12 +1139,19 @@ function ClipLogPage({ products, clips, onEditClip }) {
   );
 }
 
-function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepostDone, onPromoteToA }) {
+function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeSimilar, onEditClip, onMarkRepostDone, onPromoteToA }) {
   const [period, setPeriod] = useState('30'); const days = Number(period); const cutoff = Date.now() - days * 86400000; const recent = useMemo(() => clips.filter(c => new Date(c.postedAt).getTime() >= cutoff), [clips, cutoff]);
+  
+  // ✅ ระบบแก้ไขเป้าหมายรายได้ (Dynamic Edit)
+  const revenueTarget = appSettings?.monthlyRevenueTarget || MONTHLY_REVENUE_TARGET;
+  const [isEditingGoal, setIsEditingGoal] = useState(false);
+  const [goalDraft, setGoalDraft] = useState(revenueTarget);
+  useEffect(() => { setGoalDraft(revenueTarget); }, [revenueTarget]);
+
   const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips, days), [products, clips, days]);
   const eCandidates = useMemo(() => getECandidates(products, clips), [products, clips]);
   const cutCandidates = useMemo(() => getProductsToCut(products, clips), [products, clips]);
-  const roi = useMemo(() => getROIAnalysis(products, clips, MONTHLY_REVENUE_TARGET), [products, clips]);
+  const roi = useMemo(() => getROIAnalysis(products, clips, revenueTarget), [products, clips, revenueTarget]);
 
   const abcdStats = useMemo(() => {
     const stats = { A: { gmv: 0, count: 0 }, B: { gmv: 0, count: 0 }, C: { gmv: 0, count: 0 }, D: { gmv: 0, count: 0 } };
@@ -1147,21 +1180,39 @@ function DashboardView({ products, clips, onMakeSimilar, onEditClip, onMarkRepos
   return (
     <div className="space-y-6">
       <div className="bg-[#012b25] text-white rounded-3xl p-6 md:p-8 shadow-xl border border-[#043d34] space-y-6">
-        <div><h3 className="font-display text-lg text-lime-400 flex items-center gap-2"><Target className="w-5 h-5" /> Strategic Target Planner (คำนวณจำนวนสินค้าพิชิตเป้าหมาย)</h3><p className="text-xs text-emerald-300">ประมวลผลเป้าค่าคอมมิชชันรายเดือน ฿{fmtNum(MONTHLY_REVENUE_TARGET)} เทียบสัดส่วนราคากับ % คอมมิชชันสะสมจริง</p></div>
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div><h3 className="font-display text-lg text-lime-400 flex items-center gap-2"><Target className="w-5 h-5" /> Strategic Target Planner</h3><p className="text-xs text-emerald-300 mt-1">คำนวณจำนวนสินค้าที่ต้องขายคนเดียวเพื่อพิชิตเป้าหมายรายเดือน</p></div>
+          <div className="bg-[#033c32] p-2 rounded-2xl border border-[#065345] flex items-center gap-3">
+            <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider pl-2">เป้ารายเดือน:</span>
+            {isEditingGoal ? (
+              <div className="flex items-center gap-1">
+                <input type="number" value={goalDraft} onChange={e => setGoalDraft(Number(e.target.value))} className="w-24 px-2 py-1 bg-white text-[#012b25] font-mono font-bold text-sm rounded-lg focus:outline-none" autoFocus />
+                <button onClick={() => { onUpdateSettings({ monthlyRevenueTarget: goalDraft }); setIsEditingGoal(false); }} className="bg-[#bcd924] text-[#012b25] p-1.5 rounded-lg"><CheckCircle2 className="w-4 h-4" /></button>
+                <button onClick={() => { setGoalDraft(revenueTarget); setIsEditingGoal(false); }} className="bg-rose-500/20 text-rose-300 p-1.5 rounded-lg"><X className="w-4 h-4" /></button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 cursor-pointer group pr-2" onClick={() => setIsEditingGoal(true)}>
+                <span className="font-display text-lg text-white">฿{fmtNum(revenueTarget)}</span>
+                <Edit3 className="w-3.5 h-3.5 text-emerald-500 group-hover:text-white transition-colors ml-1" />
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="bg-[#033c32] p-5 rounded-2xl border border-[#065345] grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ประมาณการค่าคอมมิชชันปัจจุบัน</span><span className="font-display text-xl text-white">฿{fmtNum(Math.round(roi.totalCommRevenue))}</span></div>
-          <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ความคืบหน้าถึงเป้าหมาย</span><span className="font-display text-xl text-[#bcd924]">{roi.pct}%</span></div>
+          <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ประมาณการคอมมิชชันปัจจุบัน</span><span className="font-display text-xl text-white">฿{fmtNum(Math.round(roi.totalCommRevenue))}</span></div>
+          <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ความคืบหน้า</span><span className="font-display text-xl text-[#bcd924]">{roi.pct}%</span></div>
           <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ยอดเงินที่ยังขาด</span><span className="font-display text-xl text-rose-400">฿{fmtNum(Math.round(roi.gap))}</span></div>
         </div>
         <div className="space-y-2.5">
-          <span className="text-xs font-bold text-emerald-200 uppercase tracking-wider block">📊 จำนวนชิ้นที่ต้องการขายคนเดียวแยกรายสินค้าเพื่อบรรลุเป้าหมายช่องหลัก:</span>
+          <span className="text-xs font-bold text-emerald-200 uppercase tracking-wider block">📊 จำนวนชิ้นที่ต้องการขายคนเดียวแยกรายสินค้าเพื่อบรรลุเป้า:</span>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-1">
             {roi.items.map(i => {
-              const unitsNeeded = i.commPerOrder > 0 ? Math.ceil(MONTHLY_REVENUE_TARGET / i.commPerOrder) : 0;
+              const unitsNeeded = i.commPerOrder > 0 ? Math.ceil(revenueTarget / i.commPerOrder) : 0;
               return (
-                <div key={i.product.id} className="bg-[#04342d]/80 border border-[#064a3f] p-4 rounded-2xl flex flex-col justify-between">
+                <div key={i.product.id} className="bg-[#04342d]/80 border border-[#064a3f] p-4 rounded-2xl flex flex-col justify-between hover:bg-[#05443a] transition-colors">
                   <div className="flex items-start justify-between gap-2"><span className="font-display text-sm text-white font-bold leading-tight">{i.product.name}</span><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${getAbcdInfo(i.product.category).bg}`}>{i.product.category}</span></div>
-                  <div className="flex justify-between items-baseline pt-4 border-t border-[#064239]/60 mt-3 text-xs"><span className="text-emerald-300 font-medium font-mono">฿{fmtNum(i.commPerOrder)} คอมมิชชัน/ชิ้น</span><span className="font-display text-sm text-[#bcd924] font-bold font-mono">ต้องขาย {fmtNum(unitsNeeded)} ชิ้น</span></div>
+                  <div className="flex justify-between items-baseline pt-4 border-t border-[#064239]/60 mt-3 text-xs"><span className="text-emerald-300 font-medium font-mono">฿{fmtNum(i.commPerOrder)} คอม/ชิ้น</span><span className="font-display text-sm text-[#bcd924] font-bold font-mono">ต้องขาย {fmtNum(unitsNeeded)} ชิ้น</span></div>
                 </div>
               );
             })}
