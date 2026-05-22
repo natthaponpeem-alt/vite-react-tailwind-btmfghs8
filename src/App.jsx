@@ -95,22 +95,30 @@ function getStatsPending(clips) {
 }
 
 function calcScore(sc = {}) { 
-  let total = 0, max = 0; 
+  let total = 0, max = 18; // 👈 บังคับฐานคะแนนเต็มที่ 18 เสมอ!
   const cv = (v) => v === '' || v === null || v === undefined ? null : Number(v); 
+  
   const commission = cv(sc.commission); 
-  if (commission !== null && !isNaN(commission)) { total += commission >= 20 ? 3 : commission >= 15 ? 2 : commission >= 10 ? 1 : 0; max += 3; } 
+  if (commission !== null && !isNaN(commission)) { total += commission >= 20 ? 3 : commission >= 15 ? 2 : commission >= 10 ? 1 : 0; } 
+  
   const g7 = cv(sc.gmv7dPct), g30 = cv(sc.gmv30dPct); 
-  if (g7 !== null && g30 !== null && !isNaN(g7) && !isNaN(g30)) { if (g7 > 0 && g30 > 0) total += 3; else if (g7 < 0 && g30 < 0) total += 1; else total += 2; max += 3; } 
-  else if (g7 !== null && !isNaN(g7)) { total += g7 > 0 ? 2 : 1; max += 3; } 
+  if (g7 !== null && g30 !== null && !isNaN(g7) && !isNaN(g30)) { if (g7 > 0 && g30 > 0) total += 3; else if (g7 < 0 && g30 < 0) total += 1; else total += 2; } 
+  else if (g7 !== null && !isNaN(g7)) { total += g7 > 0 ? 2 : 1; } 
+  else if (g30 !== null && !isNaN(g30)) { total += g30 > 0 ? 2 : 1; } 
+  
   const creators = cv(sc.creatorCount); 
-  if (creators !== null && !isNaN(creators)) { total += creators <= 500 ? 3 : creators <= 1000 ? 2 : 1; max += 3; } 
+  if (creators !== null && !isNaN(creators)) { total += creators <= 500 ? 3 : creators <= 1000 ? 2 : 1; } 
+  
   const angles = cv(sc.anglesCount); 
-  if (angles !== null && !isNaN(angles)) { total += angles >= 3 ? 3 : angles >= 2 ? 2 : 1; max += 3; } 
+  if (angles !== null && !isNaN(angles)) { total += angles >= 3 ? 3 : angles >= 2 ? 2 : 1; } 
+  
   const cr = cv(sc.crPct); 
-  if (cr !== null && !isNaN(cr)) { total += cr >= 20 ? 3 : cr >= 10 ? 2 : 1; max += 3; } 
+  if (cr !== null && !isNaN(cr)) { total += cr >= 20 ? 3 : cr >= 10 ? 2 : 1; } 
+  
   const conc = cv(sc.concentration); 
-  if (conc !== null && !isNaN(conc)) { total += conc < 30 ? 3 : conc <= 60 ? 2 : 1; max += 3; } 
-  return { total, max, pct: max > 0 ? Math.round((total / max) * 100) : 0 }; 
+  if (conc !== null && !isNaN(conc)) { total += conc < 30 ? 3 : conc <= 60 ? 2 : 1; } 
+  
+  return { total, max, pct: Math.round((total / max) * 100) }; 
 }
 
 function getDecision(pct) { return pct >= PICK_THRESHOLD ? 'PICK' : pct >= WAIT_THRESHOLD ? 'WAIT' : 'DROP'; }
@@ -915,8 +923,9 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
               const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category); 
               const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
               const comm = p.scorecard?.commission || 0;
-              const trend = p.scorecard?.gmv30dPct || '';
-              const trendIsUp = Number(trend) > 0;
+              const rawTrend = p.scorecard?.gmv30dPct;
+              const hasTrend = rawTrend !== undefined && rawTrend !== null && rawTrend !== ''; // ✅ ดักจับค่า Trend ให้แม่นยำขึ้น
+              const trendIsUp = Number(rawTrend) > 0;
 
               return (
                 <div key={p.id} onClick={() => onSelect(p.id)} className={`bg-white border ${isStale ? 'border-amber-400 shadow-sm shadow-amber-100' : 'border-slate-100'} rounded-3xl p-5 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between relative group`}>
@@ -932,17 +941,16 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                     <p className="text-xs text-slate-400 mt-1 truncate">{p.brand || 'No brand'}</p>
                   </div>
                   
-                  {/* ✅ แผงเพิ่ม Comm และ Trend ในโหมด Box */}
                   <div className="mt-4 flex items-center gap-4 text-xs font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                     <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Comm.</span><span className="font-bold text-violet-700">{comm > 0 ? `${comm}%` : '-'}</span></div>
-                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Trend 30d</span><span className={`font-bold ${trend !== '' ? (trendIsUp ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-600'}`}>{trend !== '' ? `${trendIsUp ? '+' : ''}${trend}%` : '-'}</span></div>
+                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Trend 30d</span><span className={`font-bold ${hasTrend ? (trendIsUp ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-600'}`}>{hasTrend ? `${trendIsUp ? '+' : ''}${rawTrend}%` : '-'}</span></div>
                   </div>
 
                   <div className="mt-4 pt-4 border-t border-slate-50 flex items-end justify-between">
                     <div>
                       <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Argoon Score</div>
                       <div className={`font-mono font-bold text-sm mt-0.5 ${!p.lastScoredAt ? 'text-amber-500' : 'text-slate-800'}`}>
-                        {!p.lastScoredAt ? 'PENDING' : `${p.score}/${p.maxScore}`} <span className="text-xs text-slate-400 font-normal">{!p.lastScoredAt ? '' : `(${p.scorePct}%)`}</span>
+                        {!p.lastScoredAt ? 'PENDING' : `${p.score}/${p.maxScore || 18}`} <span className="text-xs text-slate-400 font-normal">{!p.lastScoredAt ? '' : `(${p.scorePct}%)`}</span>
                       </div>
                     </div>
                     <div className={`text-[10px] font-bold px-2.5 py-1.5 rounded-xl ${dec.bg} ${dec.text}`}>{dec.label}</div>
@@ -960,8 +968,9 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                   const clipCount = clips.filter(c => c.productId === p.id).length; const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category);
                   const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
                   const comm = Number(p.scorecard?.commission) || 0;
-                  const trend = p.scorecard?.gmv30dPct;
-                  const trendIsUp = Number(trend) > 0;
+                  const rawTrend = p.scorecard?.gmv30dPct;
+                  const hasTrend = rawTrend !== undefined && rawTrend !== null && rawTrend !== ''; // ✅ ดักจับค่า Trend ให้แม่นยำ
+                  const trendIsUp = Number(rawTrend) > 0;
 
                   return (
                     <tr key={p.id} className={`hover:bg-slate-50/50 group transition-colors ${isStale ? 'bg-amber-50/30' : ''}`}>
@@ -981,9 +990,9 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                       <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
                       <td className="p-4 text-center font-mono font-bold text-violet-700 bg-violet-50/30 rounded-lg">{comm > 0 ? `${comm}%` : '-'}</td>
                       <td className="p-4 text-center font-mono font-bold">
-                        {trend ? (
+                        {hasTrend ? (
                           <span className={`flex items-center justify-center gap-1 ${trendIsUp ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {trendIsUp ? <TrendingUp className="w-3 h-3"/> : <TrendingDown className="w-3 h-3"/>} {trend}%
+                            {trendIsUp ? <TrendingUp className="w-3 h-3"/> : <TrendingDown className="w-3 h-3"/>} {rawTrend}%
                           </span>
                         ) : '-'}
                       </td>
@@ -992,7 +1001,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                         {p.lastScoredAt && <div className="text-[9px] text-slate-400 font-medium">{p.scorePct}%</div>}
                       </td>
                       <td className="p-4"><span className={`inline-block text-[10px] font-bold px-2.5 py-1 rounded-full ${dec.bg} ${dec.text}`}>{dec.label}</span></td>
-                      <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-white border border-slate-200 hover:border-[#012b25] hover:text-[#012b25] px-4 py-2 rounded-xl font-bold transition-all shadow-sm">แก้ไข</button></td>
+                      <td className="p-4 text-right"><button onClick={() => onSelect(p.id)} className="text-xs bg-white border border-slate-200 hover:border-[#012b25] hover:text-[#012b25] px-4 py-2 rounded-full font-bold transition-all shadow-sm">แก้ไข</button></td>
                     </tr>
                   );
                 })}
@@ -1979,7 +1988,6 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
       const isCurrentMonth = selectedMonth === currentMonth();
       const new30d = isCurrentMonth ? (Number(salesData.last30d) || 0) + item.totalGmv : salesData.last30d;
 
-      // ✅ 4. อัปเดตตะกร้าแดง ค่าคอม และ คำนวณคะแนนใหม่ทันที (Auto-Calibration)
       const newIsShopAds = p.isShopAds || item.isShopAds;
       const newGmvMax = Math.max(Number(p.gmvMaxPct) || 0, item.gmvMaxPct);
       const newComm = Math.max(Number(p.scorecard?.commission) || 0, item.commission);
@@ -1992,11 +2000,11 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
         gmvMaxPct: newGmvMax > 0 ? String(newGmvMax) : (p.gmvMaxPct || ''),
         scorecard: newScorecard,
         score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct),
-        salesData: { ...salesData, last30d: new30d, monthly: monthlyRecord, updatedAt: new Date().toISOString() },
-        lastScoredAt: new Date().toISOString() // อัปเดตสถานะคัดกรองว่าทำแล้ว
+        salesData: { ...salesData, last30d: new30d, monthly: monthlyRecord, updatedAt: new Date().toISOString() }
+        // ❌ ลบอัปเดตเวลา lastScoredAt ออก เพื่อให้สินค้ารักษาสถานะ PENDING/Stale เอาไว้
       });
     });
-    showToast(`ซิงก์ยอดขายและอัปเดต Score สินค้า ${parsedData.matched.length} รายการ เรียบร้อย!`, 'success');
+    showToast(`ซิงก์ยอดขายและอัปเดตค่าคอม ${parsedData.matched.length} รายการ เรียบร้อย!`, 'success');
     onClose();
   };
 
@@ -2005,16 +2013,19 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
     const monthlyRecord = { [selectedMonth]: ghost.totalGmv };
     const isCurrentMonth = selectedMonth === currentMonth();
 
+    const initialScorecard = { commission: ghost.commission > 0 ? String(ghost.commission) : '' };
+    const s = calcScore(initialScorecard);
+
     onQuickAdd({
       name: ghost.name, brand: ghost.brand, tiktokProductId: ghost.tiktokProductId, price: ghost.price,
       isShopAds: ghost.isShopAds, 
       gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', 
       productType: autoType, 
-      scorecard: { commission: ghost.commission > 0 ? String(ghost.commission) : '' },
-      score: 0, maxScore: 18, scorePct: 0, decision: 'WAIT', // 👈 ให้คะแนนเป็นศูนย์เพื่อรอการประเมิน
+      scorecard: initialScorecard,
+      score: s.total, maxScore: s.max, scorePct: s.pct, decision: 'WAIT', // 👈 บังคับให้ติด WAIT ไว้ก่อน
       salesData: { last30d: isCurrentMonth ? ghost.totalGmv : 0, monthly: monthlyRecord, last7d: 0, updatedAt: new Date().toISOString() },
       category: ghost.totalGmv >= 10000 ? 'B' : 'C',
-      lastScoredAt: null // 👈 ตั้งเป็น null เพื่อให้เด้งไปเข้าคิว PENDING / Stale ทันที
+      lastScoredAt: null // 👈 ตั้งเป็น null เพื่อให้เด้งเข้ากล่องสีส้ม PENDING ทันที!
     });
     setParsedData(prev => ({ ...prev, ghosts: prev.ghosts.filter(g => g.tiktokProductId !== ghost.tiktokProductId) }));
   };
