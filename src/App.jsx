@@ -168,6 +168,8 @@ export default function App() {
   const [editClipId, setEditClipId] = useState(null);
   const [clipForVOnly, setClipForVOnly] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  
+  const [showRadarModal, setShowRadarModal] = useState(false);
 
   const [confirmDeleteProdId, setConfirmDeleteProdId] = useState(null);
   const [confirmDeleteClipId, setConfirmDeleteClipId] = useState(null);
@@ -412,7 +414,7 @@ export default function App() {
 
         <div className="p-6 md:p-8 space-y-8">
           {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
-          {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} />)}
+          {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
           {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}/>)}
@@ -433,6 +435,7 @@ export default function App() {
       {showBackup && <BackupModal products={products} clips={clips} onClose={() => setShowBackup(false)} showToast={showToast} />}
       {showSettings && <SettingsModal appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onClose={() => setShowSettings(false)} onExport={() => { setShowSettings(false); setShowBackup(true); }} onClearAll={() => setConfirmClearDb(true)} />}
 
+      {showRadarModal && <TikTokRadarModal products={products} onClose={() => setShowRadarModal(false)} onUpdateProduct={updateProductInCloud} onQuickAdd={async (data) => { const id = uid(); await updateProductInCloud(id, { ...data, id, createdAt: new Date().toISOString() }); showToast('ดึงสินค้าผีเข้าพอร์ตสำเร็จ!'); }} showToast={showToast} />}
       {/* OVERLAYS */}
       {confirmDeleteProdId && (
         <div className="fixed inset-0 bg-[#012b25]/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
@@ -770,7 +773,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   );
 }
 
-function ProductHubPage({ products, clips, onAdd, onSelect }) {
+function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all'); const [sortBy, setSortBy] = useState('score');
   
@@ -809,7 +812,8 @@ function ProductHubPage({ products, clips, onAdd, onSelect }) {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="relative flex-1"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search for items..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1"><Plus className="w-4 h-4" /> Add Product</button>
+            <button onClick={onOpenRadar} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> สแกนเรดาร์ TikTok</button>
+            <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Product</button>
             <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกพอร์ต</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="stale">⏱️ Stale</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
             <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกหมวดหมู่</option>{PRODUCT_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select>
           </div>
@@ -1576,7 +1580,161 @@ function BackupModal({ products, clips, onClose, showToast }) {
   const sizeKB = (new Blob([json]).size / 1024).toFixed(1);
   return (<Modal title="💾 ระบบสำรองข้อมูล (Backup)" onClose={onClose} size="lg" footer={<div className="grid grid-cols-2 gap-3"><button onClick={tryDownload} className={`font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 ${downloaded ? 'bg-emerald-500 text-white' : 'bg-white border border-slate-200 text-[#012b25] hover:bg-slate-50'}`}>{downloaded ? <><CheckCircle2 className="w-5 h-5" /> เสร็จสิ้น</> : <><Download className="w-5 h-5" /> Download (.json)</>}</button><button onClick={copyAll} className={`font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-[#012b25] text-[#bcd924] hover:bg-[#033c32]'}`}>{copied ? <><CheckCircle2 className="w-5 h-5" /> คัดลอกแล้ว</> : <><Copy className="w-5 h-5" /> Copy Code</>}</button></div>}><div className="bg-slate-50 border border-slate-100 rounded-3xl p-5 mb-5 grid grid-cols-3 gap-4 text-center divide-x divide-slate-200"><div><div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">📦 สินค้าในพอร์ต</div><div className="font-display text-2xl text-[#012b25]">{products.length}</div></div><div><div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">🎬 คลิปประวัติ</div><div className="font-display text-2xl text-[#012b25]">{clips.length}</div></div><div><div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">💾 ขนาดไฟล์</div><div className="font-display text-2xl text-[#012b25]">{sizeKB} <span className="text-sm text-stone-400 font-sans">KB</span></div></div></div><div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-4 text-xs shadow-sm"><div className="font-bold text-emerald-900 mb-1.5 flex items-center gap-1.5"><Cloud className="w-4 h-4"/> ข้อมูลของคุณปลอดภัยบน Cloud แล้ว!</div><div className="text-emerald-800/80 font-medium leading-relaxed space-y-1.5"><p>ปัจจุบันระบบใช้สถาปัตยกรรม <strong className="text-emerald-900">Subcollections</strong> ทำให้มีการเซฟอัตโนมัติ (Auto-Sync) แบบ Real-time</p><p>คุณสามารถกด Download เก็บไฟล์ <code className="bg-white px-2 py-0.5 rounded-md border border-emerald-200 shadow-sm font-mono font-bold">{filename}</code> นี้ไว้ทุกสิ้นเดือน เพื่อเป็น Snapshot ประวัติสำรองของช่องตัวเองได้ครับ</p></div></div><details className="group"><summary className="text-xs font-bold text-[#012b25] cursor-pointer hover:text-emerald-700 transition-colors">▸ กดเพื่อดูตัวอย่างข้อมูลดิบ (JSON Preview)</summary><textarea readOnly value={json} className="w-full h-48 px-3 py-3 text-[10px] font-mono bg-slate-900 text-emerald-300 rounded-2xl mt-3 resize-none shadow-inner focus:outline-none" onClick={e => e.target.select()} /></details></Modal>);
 }
+// ============================================================================
+// [ZONE 6] TIKTOK CSV RADAR & GHOST DETECTOR
+// ============================================================================
+function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, showToast }) {
+  const [rawData, setRawData] = useState('');
+  const [parsedData, setParsedData] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
+  const processData = () => {
+    setIsProcessing(true);
+    setTimeout(() => {
+      try {
+        const rows = rawData.trim().split('\n');
+        if (rows.length < 2) {
+          showToast('ข้อมูลไม่ถูกต้อง หรือมีแค่หัวตาราง', 'error');
+          setIsProcessing(false); return;
+        }
+        
+        // Auto-detect การเว้นวรรค (Tab จาก Excel หรือ Comma จาก CSV)
+        const delimiter = rows[0].includes('\t') ? '\t' : ',';
+        const parseRow = (line) => {
+          if (delimiter === '\t') return line.split('\t');
+          const result = []; let current = ''; let inQuotes = false;
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') inQuotes = !inQuotes;
+            else if (char === ',' && !inQuotes) { result.push(current); current = ''; } 
+            else current += char;
+          }
+          result.push(current); return result;
+        };
+
+        const headers = parseRow(rows[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+        const idIdx = headers.indexOf('รหัสสินค้า');
+        const nameIdx = headers.indexOf('ชื่อสินค้า');
+        const priceIdx = headers.indexOf('ราคา');
+        const brandIdx = headers.indexOf('ชื่อร้านค้า');
+        const gmvIdx = headers.indexOf('GMV');
+        const commIdx = headers.indexOf('มาตรฐาน');
+
+        if (idIdx === -1 || gmvIdx === -1) {
+          showToast('หาคอลัมน์ "รหัสสินค้า" หรือ "GMV" ไม่เจอ โปรดเช็คข้อมูล', 'error');
+          setIsProcessing(false); return;
+        }
+
+        const aggregated = {};
+        for (let i = 1; i < rows.length; i++) {
+          if (!rows[i].trim()) continue;
+          const cols = parseRow(rows[i]).map(c => c.trim().replace(/^"|"$/g, ''));
+          const pId = cols[idIdx];
+          if (!pId) continue;
+          
+          let gmvVal = Number((cols[gmvIdx] || '0').replace(/,/g, ''));
+          if (isNaN(gmvVal)) gmvVal = 0;
+          let priceVal = Number((cols[priceIdx] || '0').replace(/,/g, ''));
+          let commVal = cols[commIdx]?.includes('%') ? Number(cols[commIdx].replace('%','')) : 0;
+
+          if (!aggregated[pId]) {
+            aggregated[pId] = {
+              tiktokProductId: pId, name: cols[nameIdx] || 'ไม่ระบุชื่อ', brand: cols[brandIdx] || '',
+              price: isNaN(priceVal) ? 0 : priceVal, commission: isNaN(commVal) ? 0 : commVal, totalGmv: 0, orderCount: 0
+            };
+          }
+          aggregated[pId].totalGmv += gmvVal;
+          aggregated[pId].orderCount += 1;
+        }
+
+        const matched = []; const ghosts = [];
+        Object.values(aggregated).forEach(item => {
+          const existing = products.find(p => p.tiktokProductId === item.tiktokProductId);
+          if (existing) matched.push({ ...item, product: existing });
+          else ghosts.push(item);
+        });
+        
+        matched.sort((a,b) => b.totalGmv - a.totalGmv);
+        ghosts.sort((a,b) => b.totalGmv - a.totalGmv);
+        setParsedData({ matched, ghosts });
+      } catch (e) {
+        showToast('เกิดข้อผิดพลาดในการอ่านข้อมูล', 'error');
+      }
+      setIsProcessing(false);
+    }, 500);
+  };
+
+  const handleSyncMatched = () => {
+    parsedData.matched.forEach(item => {
+      const p = item.product;
+      const salesData = p.salesData || {};
+      const new30d = (Number(salesData.last30d) || 0) + item.totalGmv;
+      onUpdateProduct(p.id, { salesData: { ...salesData, last30d: new30d, updatedAt: new Date().toISOString() } });
+    });
+    showToast(`ซิงก์ยอดขาย ${parsedData.matched.length} สินค้าเรียบร้อย!`, 'success');
+    onClose();
+  };
+
+  const handleQuickAdd = (ghost) => {
+    onQuickAdd({
+      name: ghost.name, brand: ghost.brand, tiktokProductId: ghost.tiktokProductId, price: ghost.price,
+      scorecard: { commission: ghost.commission || '' },
+      salesData: { last30d: ghost.totalGmv, last7d: 0, updatedAt: new Date().toISOString() },
+      category: ghost.totalGmv >= 10000 ? 'B' : 'C', productType: 'other'
+    });
+    setParsedData(prev => ({ ...prev, ghosts: prev.ghosts.filter(g => g.tiktokProductId !== ghost.tiktokProductId) }));
+  };
+
+  const footer = parsedData ? (
+    <div className="flex gap-3">
+      <button onClick={() => setParsedData(null)} className="px-5 py-3.5 bg-slate-100 text-slate-700 font-bold rounded-2xl transition-all hover:bg-slate-200">สแกนใหม่</button>
+      <button onClick={handleSyncMatched} disabled={parsedData.matched.length === 0} className="flex-1 bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-3.5 rounded-2xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all"><RefreshCw className="w-5 h-5"/> อัปเดตยอดสินค้าที่พบเข้าคลัง ({parsedData.matched.length} รายการ)</button>
+    </div>
+  ) : (
+    <button onClick={processData} disabled={!rawData} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md flex items-center justify-center gap-2 disabled:opacity-50 transition-all">{isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5"/>} เริ่มสแกนเรดาร์</button>
+  );
+
+  return (
+    <Modal title="📡 สแกนยอดขาย TikTok (CSV Radar)" onClose={onClose} size="xl" footer={footer}>
+      {!parsedData ? (
+        <div className="space-y-4">
+          <div className="bg-sky-50 border border-sky-100 p-4 rounded-2xl text-xs text-sky-800 leading-relaxed shadow-sm">
+            <strong>วิธีใช้งาน:</strong> เปิดหน้าคำสั่งซื้อในแอป TikTok Affiliate &gt; กด Export ข้อมูล &gt; เปิดไฟล์ Excel แล้ว <strong>Copy ข้อมูลตารางมาวาง (Paste) ในช่องด้านล่างนี้ได้เลย</strong> (ไม่ต้องลบหัวตาราง)
+          </div>
+          <textarea value={rawData} onChange={(e) => setRawData(e.target.value)} className="w-full h-64 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-[10px] font-mono whitespace-pre focus:outline-none focus:border-[#012b25]/30 focus:ring-2 focus:ring-[#012b25]/10 resize-none" placeholder="คลิกขวา -> Paste ข้อมูลจาก Excel ตรงนี้..."></textarea>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div>
+            <h3 className="font-display text-base text-[#012b25] mb-3 flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-500" /> 🟢 สแกนเจอในระบบ (พร้อม Auto-Sync) - {parsedData.matched.length} รายการ</h3>
+            <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl overflow-hidden shadow-sm">
+              <div className="max-h-[250px] overflow-y-auto">
+                <table className="w-full text-left text-xs"><thead className="bg-emerald-100/50 sticky top-0"><tr className="font-bold text-emerald-800"><th className="p-3">สินค้าในคลังของเรา</th><th className="p-3 text-right">จำนวนออเดอร์</th><th className="p-3 text-right">+ GMV ที่จะบวกเพิ่ม</th></tr></thead><tbody className="divide-y divide-emerald-50">
+                  {parsedData.matched.length === 0 ? <tr><td colSpan="3" className="p-6 text-center text-slate-400 font-medium">ไม่มีข้อมูลยอดขายที่ตรงกับสินค้าในระบบ</td></tr> : parsedData.matched.map((m, i) => (
+                    <tr key={i} className="hover:bg-emerald-50/80"><td className="p-3"><div className="font-semibold text-[#012b25] line-clamp-1">{m.product.name}</div><div className="text-[10px] text-slate-500 font-mono mt-0.5">ID: {m.tiktokProductId}</div></td><td className="p-3 text-right font-mono text-slate-600">{m.orderCount}</td><td className="p-3 text-right font-mono font-bold text-emerald-700">+฿{fmtNum(m.totalGmv)}</td></tr>
+                  ))}
+                </tbody></table>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3 className="font-display text-base text-rose-800 mb-3 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-rose-500" /> 👻 สินค้าตกสำรวจ (Ghost Items) - {parsedData.ghosts.length} รายการ</h3>
+            <div className="bg-rose-50/50 border border-rose-100 rounded-2xl overflow-hidden shadow-sm">
+              <div className="max-h-[250px] overflow-y-auto">
+                <table className="w-full text-left text-xs"><thead className="bg-rose-100/50 sticky top-0"><tr className="font-bold text-rose-800"><th className="p-3">สินค้าที่ AI เจอในไฟล์</th><th className="p-3 text-right">ออเดอร์</th><th className="p-3 text-right">GMV รวม</th><th className="p-3 text-right">ดำเนินการ</th></tr></thead><tbody className="divide-y divide-rose-50">
+                  {parsedData.ghosts.length === 0 ? <tr><td colSpan="4" className="p-6 text-center text-slate-400 font-medium">สุดยอด! ไม่มีสินค้าไหนรอดสายตาคุณไปได้เลย</td></tr> : parsedData.ghosts.map((g, i) => (
+                    <tr key={i} className="hover:bg-rose-50/80"><td className="p-3"><div className="font-semibold text-rose-900 line-clamp-1">{g.name}</div><div className="text-[10px] text-rose-600/70 font-mono mt-0.5">{g.brand} · คอม ≈{g.commission}%</div></td><td className="p-3 text-right font-mono text-rose-800">{g.orderCount}</td><td className="p-3 text-right font-mono font-bold text-rose-700">฿{fmtNum(g.totalGmv)}</td><td className="p-3 text-right"><button onClick={() => handleQuickAdd(g)} className="bg-[#012b25] text-[#d9eb54] px-4 py-2 rounded-xl font-bold hover:bg-[#033c32] shadow-sm transition-all">+ ดึงเข้าพอร์ต</button></td></tr>
+                  ))}
+                </tbody></table>
+              </div>
+            </div>
+            <p className="text-[10px] font-bold text-slate-500 mt-3 ml-2 flex items-center gap-1"><Lightbulb className="w-3 h-3 text-amber-500"/> การกด "+ ดึงเข้าพอร์ต" ระบบจะสร้างการ์ดสินค้าตัวใหม่ให้ทันที (คุณสามารถไปตั้งหมวด ABCD ได้ภายหลัง)</p>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
 function SettingsModal({ appSettings, onUpdateSettings, onClose, onExport, onClearAll }) {
   const [notice, setNotice] = useState(appSettings.noticeBoard || '');
   return (<Modal title="⚙️ แผงควบคุมระบบ (Settings)" onClose={onClose}><div className="space-y-4"><div className="bg-slate-50 border border-slate-100 p-5 rounded-3xl mb-4"><FormField label="กระดานกลยุทธ์ประจำสัปดาห์ (Notice Board)"><textarea value={notice} onChange={e=>setNotice(e.target.value)} rows={3} className={`${inputStyles} bg-white border-slate-200 resize-none`} placeholder="ประกาศเป้าหมายให้ตัวเอง หรือปักหมุดข่าวสารของช่อง..." /></FormField><button onClick={() => { onUpdateSettings({ noticeBoard: notice }); onClose(); }} className="w-full bg-[#012b25] hover:bg-[#033c32] text-[#d9eb54] transition-all font-bold py-3.5 rounded-xl shadow-md flex justify-center items-center gap-2"><Lightbulb className="w-4 h-4" /> ปักหมุดกลยุทธ์ลงบอร์ด</button></div><button onClick={onExport} className="w-full p-4 bg-white border border-slate-100 hover:border-[#012b25]/30 hover:shadow-md rounded-2xl text-left transition-all group flex items-center gap-4"><div className="p-3 bg-slate-50 group-hover:bg-[#bcd924] rounded-xl transition-colors"><Download className="w-5 h-5 text-stone-400 group-hover:text-[#012b25]" /></div><div><div className="font-bold text-[#012b25] text-sm mb-0.5">ระบบสำรองข้อมูล (Export JSON)</div><div className="text-[10px] text-stone-500 font-medium">โหลดไฟล์ Snapshot ดิบไว้เก็บสำรองในคอมพิวเตอร์</div></div></button><div className="border-t border-slate-100 pt-4"><button onClick={onClearAll} className="w-full p-4 bg-rose-50 hover:bg-rose-100 border border-rose-100 text-rose-700 rounded-2xl text-left transition-all"><div className="font-bold text-sm flex items-center gap-2"><Trash2 className="w-4 h-4"/> ล้างทำลายฐานข้อมูลทั้งหมด (Factory Reset)</div><div className="text-xs mt-1 text-rose-600/80">⚠️ ลบข้อมูลทิ้งทั้งบนเครื่องและบน Cloud แบบกู้คืนไม่ได้</div></button></div><div className="bg-slate-50 rounded-2xl p-4 mt-4 text-[11px] text-slate-500 space-y-2 leading-relaxed border border-slate-100"><div className="font-bold text-slate-700 uppercase tracking-wider mb-2">System Parameters</div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Version:</strong> PEEM6PACK Command Center v2.6 (Cloud Firestore Subcollections)</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Argoon Gate:</strong> เต็ม {ARGOON_MAX} คะแนน | ผ่านเกณฑ์ (PASS) ที่ ≥{ARGOON_PASS} | เฝ้าระวัง (WAIT) ที่ {ARGOON_WATCH}-{ARGOON_PASS - 1} | ตัดทิ้ง (CUT) หากต่ำกว่า {ARGOON_WATCH}</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Decision AI:</strong> ประทับตรา PICK เมื่อ ≥{PICK_THRESHOLD}% | ตรา WAIT เมื่อ ≥{WAIT_THRESHOLD}% | ตรา DROP ตัดทิ้งเมื่อต่ำกว่า {WAIT_THRESHOLD}%</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>SaaS Portfolio:</strong> A (Hero) {PORTFOLIO_TARGET.A}% / B (Test) {PORTFOLIO_TARGET.B}% / C (Volume) {PORTFOLIO_TARGET.C}% / D (Premium) {PORTFOLIO_TARGET.D}%</p></div></div></div></Modal>);
