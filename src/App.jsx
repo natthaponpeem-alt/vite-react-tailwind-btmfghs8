@@ -6,7 +6,7 @@ import {
   Trophy, Search, RefreshCw, DollarSign, Activity, LayoutGrid, 
   List, ArrowUpDown, ExternalLink, Database, Flame, TrendingUp, 
   TrendingDown, AlertTriangle, Lightbulb, Repeat, Cloud, CloudOff, 
-  User, Bell
+  User, Bell, CalendarDays
 } from 'lucide-react';
 
 // ============================================================================
@@ -132,11 +132,68 @@ function getCategoryStack(products, clips, category) { if (!Array.isArray(produc
 function getECandidates(products, clips) { if (!Array.isArray(products)) return []; return products.map(p => { if (p.category === 'A') return null; if (daysSince(p.createdAt) < 14) return null; const sales30d = getProductSales(p, clips, 30).primary; const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length; const rank = Number(p.tiktokRank) || 0; const commission = Number(p.scorecard?.commission || 0); let eScore = 0; const reasons = []; if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)} (mass)`); } else if (sales30d >= 10000) { eScore += 1; reasons.push(`GMV ฿${fmtNum(sales30d)}`); } if (winnerCount >= 2) { eScore += 2; reasons.push(`${winnerCount} winner clips`); } else if (winnerCount === 1) { eScore += 1; reasons.push('1 winner clip'); } if (rank > 0 && rank <= 10) { eScore += 1; reasons.push(`Top #${rank} ตลาด`); } if (commission >= 15) { eScore += 1; reasons.push(`คอม ${commission}% ดี`); } if (p.isShopAds) { eScore += 1; reasons.push('Shop Ads 🛒'); } if (eScore < 2) return null; let confidence, advice; if (eScore >= 5) { confidence = 'high'; advice = 'ย้ายเป็น A เพื่อขยี้คอนเทนต์'; } else if (eScore >= 3) { confidence = 'medium'; advice = 'พิจารณาย้าย / เทสต่อ 1-2 wk'; } else { confidence = 'low'; advice = 'มี signal เริ่มต้น — เทสต่อ'; } return { product: p, eScore, confidence, reasons, sales30d, winnerCount, advice }; }).filter(Boolean).sort((a, b) => b.eScore - a.eScore); }
 function getROIAnalysis(products, clips, monthlyTargetGMV) { if (!Array.isArray(products)) return { items: [], totalCommRevenue: 0, gap: monthlyTargetGMV, pct: 0 }; const items = products.map(p => { const sales30d = getProductSales(p, clips, 30).primary; const commission = Number(p.scorecard?.commission || 0); const price = Number(p.price) || 0; const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0; const currentCommRevenue = sales30d * commission / 100; const ordersNeededAlone = commPerOrder > 0 ? Math.ceil(monthlyTargetGMV / commPerOrder) : null; return { product: p, sales30d, commission, price, commPerOrder, currentCommRevenue, ordersNeededAlone }; }).filter(i => i.sales30d > 0 || i.commPerOrder > 0).sort((a, b) => b.currentCommRevenue - a.currentCommRevenue); const totalCommRevenue = items.reduce((s, i) => s + i.currentCommRevenue, 0); return { items, totalCommRevenue, gap: Math.max(0, monthlyTargetGMV - totalCommRevenue), pct: monthlyTargetGMV > 0 ? Math.round((totalCommRevenue / monthlyTargetGMV) * 100) : 0 }; }
 function getProductsToCut(products, clips) { if (!Array.isArray(products)) return []; return products.map(p => { const reasons = []; const commission = Number(p.scorecard?.commission || 0); const sales = getProductSales(p, clips, 30); if (commission > 0 && commission <= 5 && sales.primary < 30000) reasons.push(`คอม ${commission}% ≤5%`); if (p.scorePct && p.maxScore >= 12 && p.scorePct < WAIT_THRESHOLD) reasons.push(`Argoon ${p.score}/${p.maxScore} = CUT`); const g7 = Number(p.scorecard?.gmv7dPct); const g30 = Number(p.scorecard?.gmv30dPct); if (!isNaN(g7) && !isNaN(g30) && g7 < -20 && g30 < -20) reasons.push(`GMV ตกหนัก ${g7}% / ${g30}%`); if (daysSince(p.createdAt) >= 14 && sales.primary === 0 && sales.clipCount === 0) reasons.push('ไม่มีกิจกรรม 30d'); if (reasons.length === 0) return null; return { product: p, reasons, severity: reasons.length }; }).filter(Boolean).sort((a, b) => b.severity - a.severity); }
-function getProductSales(product, clips, days) { if (!product) return { fromClips: 0, fromManual: 0, hasManual: false, clipCount: 0, primary: 0 }; const cutoff = Date.now() - days * 86400000; const fromClips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).reduce((s, c) => s + (Number(c.gmv) || 0), 0) : 0; const clipCount = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).length : 0; const fromManual = days <= 7 ? (Number(product.salesData?.last7d) || 0) : (Number(product.salesData?.last30d) || 0); return { fromClips, fromManual, hasManual: fromManual > 0, clipCount, primary: fromManual || fromClips }; }
+function getPortfolioBalance(products, clips, timeframe = 30) { const byCat = { A: 0, B: 0, C: 0, D: 0 }; let total = 0; if (!Array.isArray(products)) return null; products.forEach(p => { if (!['A', 'B', 'C', 'D'].includes(p.category)) return; const sales = getProductSales(p, clips, timeframe); byCat[p.category] += sales.primary; total += sales.primary; }); if (total === 0) return null; return Object.fromEntries(Object.entries(byCat).map(([k, v]) => { const actual = Math.round((v / total) * 100); const target = PORTFOLIO_TARGET[k]; const diff = actual - target; return [k, { actual, target, diff, gmv: v, status: Math.abs(diff) <= 5 ? 'ok' : diff > 0 ? 'over' : 'under' }]; })); }
+function getBlendedCommission(products, clips, timeframe = 30) { let weightedSum = 0, totalGMV = 0; const breakdown = []; if (!Array.isArray(products)) return null; products.forEach(p => { const sales = getProductSales(p, clips, timeframe); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; breakdown.push({ product: p, gmv: sales.primary, commission: c, contribution: sales.primary * c }); } }); if (totalGMV === 0) return null; return { blended: Math.round((weightedSum / totalGMV) * 100) / 100, target: BLENDED_COMMISSION_TARGET, totalGMV, breakdown }; }
+function getCategoryStack(products, clips, category) { if (!Array.isArray(products)) return []; const catProducts = products.filter(p => p.category === category); const withData = catProducts.map(p => { const sales30d = getProductSales(p, clips, 30).primary; const sales7d = getProductSales(p, clips, 7).primary; const momentum = (sales30d / 30) > 0 ? (sales7d / 7) / (sales30d / 30) : 1; const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonth()).length; return { product: p, sales30d, sales7d, momentum, clipsThisMonth }; }).sort((a, b) => b.sales30d - a.sales30d); return withData.map((s, i) => { let tier, frequency, targetMonth; if (i < 2) { tier = 'HOT'; frequency = '3-4 คลิป/wk'; targetMonth = 14; } else if (i < 4) { tier = 'STEADY'; frequency = '1-2 คลิป/wk'; targetMonth = 6; } else { tier = 'PASSIVE'; frequency = '2-3 คลิป/เดือน'; targetMonth = 2.5; } const atRisk = s.momentum > 0 && s.momentum < 0.8; return { ...s, rank: i + 1, tier, frequency, targetMonth, atRisk }; }); }
+function getECandidates(products, clips, timeframe = 30) { if (!Array.isArray(products)) return []; return products.map(p => { if (p.category === 'A') return null; if (daysSince(p.createdAt) < 14) return null; const sales30d = getProductSales(p, clips, timeframe).primary; const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length; const rank = Number(p.tiktokRank) || 0; const commission = Number(p.scorecard?.commission || 0); let eScore = 0; const reasons = []; if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)} (mass)`); } else if (sales30d >= 10000) { eScore += 1; reasons.push(`GMV ฿${fmtNum(sales30d)}`); } if (winnerCount >= 2) { eScore += 2; reasons.push(`${winnerCount} winner clips`); } else if (winnerCount === 1) { eScore += 1; reasons.push('1 winner clip'); } if (rank > 0 && rank <= 10) { eScore += 1; reasons.push(`Top #${rank} ตลาด`); } if (commission >= 15) { eScore += 1; reasons.push(`คอม ${commission}% ดี`); } if (p.isShopAds) { eScore += 1; reasons.push('Shop Ads 🛒'); } if (eScore < 2) return null; let confidence, advice; if (eScore >= 5) { confidence = 'high'; advice = 'ย้ายเป็น A เพื่อขยี้คอนเทนต์'; } else if (eScore >= 3) { confidence = 'medium'; advice = 'พิจารณาย้าย / เทสต่อ 1-2 wk'; } else { confidence = 'low'; advice = 'มี signal เริ่มต้น — เทสต่อ'; } return { product: p, eScore, confidence, reasons, sales30d, winnerCount, advice }; }).filter(Boolean).sort((a, b) => b.eScore - a.eScore); }
+function getROIAnalysis(products, clips, monthlyTargetGMV, timeframe = 30) { if (!Array.isArray(products)) return { items: [], totalCommRevenue: 0, gap: monthlyTargetGMV, pct: 0 }; const items = products.map(p => { const sales = getProductSales(p, clips, timeframe); const sales30d = sales.primary; const commission = Number(p.scorecard?.commission || 0); const price = Number(p.price) || 0; const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0; const currentCommRevenue = sales30d * commission / 100; const ordersNeededAlone = commPerOrder > 0 ? Math.ceil(monthlyTargetGMV / commPerOrder) : null; return { product: p, sales30d, commission, price, commPerOrder, currentCommRevenue, ordersNeededAlone }; }).filter(i => i.sales30d > 0 || i.commPerOrder > 0).sort((a, b) => b.currentCommRevenue - a.currentCommRevenue); const totalCommRevenue = items.reduce((s, i) => s + i.currentCommRevenue, 0); return { items, totalCommRevenue, gap: Math.max(0, monthlyTargetGMV - totalCommRevenue), pct: monthlyTargetGMV > 0 ? Math.round((totalCommRevenue / monthlyTargetGMV) * 100) : 0 }; }
+function getProductsToCut(products, clips, timeframe = 30) { if (!Array.isArray(products)) return []; return products.map(p => { const reasons = []; const commission = Number(p.scorecard?.commission || 0); const sales = getProductSales(p, clips, timeframe); if (commission > 0 && commission <= 5 && sales.primary < 30000) reasons.push(`คอม ${commission}% ≤5%`); if (p.scorePct && p.maxScore >= 12 && p.scorePct < WAIT_THRESHOLD) reasons.push(`Argoon ${p.score}/${p.maxScore} = CUT`); const g7 = Number(p.scorecard?.gmv7dPct); const g30 = Number(p.scorecard?.gmv30dPct); if (!isNaN(g7) && !isNaN(g30) && g7 < -20 && g30 < -20) reasons.push(`GMV ตกหนัก ${g7}% / ${g30}%`); if (daysSince(p.createdAt) >= 14 && sales.primary === 0 && sales.clipCount === 0) reasons.push('ไม่มีกิจกรรม 30d'); if (reasons.length === 0) return null; return { product: p, reasons, severity: reasons.length }; }).filter(Boolean).sort((a, b) => b.severity - a.severity); }
+function getProductSales(product, clips, timeframe) { 
+  if (!product) return { fromClips: 0, fromManual: 0, hasManual: false, clipCount: 0, primary: 0 }; 
+  let fromClips = 0, clipCount = 0, fromManual = 0; 
+  if (typeof timeframe === 'string' && timeframe.includes('-')) { 
+    // ⏳ กรณีเลือกดึงจากสมุดบัญชีรายเดือน (เช่น 2026-04)
+    const pclips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && c.postedAt?.slice(0, 7) === timeframe) : []; 
+    fromClips = pclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); 
+    clipCount = pclips.length; 
+    fromManual = Number(product.salesData?.monthly?.[timeframe]) || 0; 
+  } else { 
+    // ⏳ กรณีดึงจากช่วงวันล่าสุด (7, 30, 90 วัน)
+    const days = Number(timeframe) || 30; 
+    const cutoff = Date.now() - days * 86400000; 
+    const pclips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff) : []; 
+    fromClips = pclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); 
+    clipCount = pclips.length; 
+    fromManual = days <= 7 ? (Number(product.salesData?.last7d) || 0) : (Number(product.salesData?.last30d) || 0); 
+  } 
+  return { fromClips, fromManual, hasManual: fromManual > 0, clipCount, primary: Math.max(fromManual, fromClips) }; 
+}
 function getBestAngle(product, clips) { if (!product?.angles?.length || !Array.isArray(clips)) return null; const stats = product.angles.map(angle => { const aclips = clips.filter(c => c.angleId === angle.id); const totalGMV = aclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); return { angle, count: aclips.length, totalGMV, avg: aclips.length > 0 ? totalGMV / aclips.length : 0 }; }).filter(s => s.count >= 1).sort((a, b) => b.avg - a.avg); return stats[0] || null; }
 function getWinners(clips, products) { if (!Array.isArray(clips)) return []; return clips.filter(c => (Number(c.gmv) || 0) >= WINNER_GMV).map(c => ({ clip: c, product: Array.isArray(products) ? products.find(p => p.id === c.productId) : null, daysOld: daysSince(c.postedAt) })).sort((a, b) => (Number(b.clip.gmv) || 0) - (Number(a.clip.gmv) || 0)); }
 function getRepostCandidates(clips, products) { return getWinners(clips, products).map(w => { const rs = w.clip.repostStatus || {}; let bucket = null; if (w.daysOld >= 30 && !rs.d30) bucket = 30; else if (w.daysOld >= 14 && !rs.d14) bucket = 14; else if (w.daysOld >= 7 && !rs.d7) bucket = 7; return bucket ? { ...w, repostBucket: bucket } : null; }).filter(Boolean).sort((a, b) => b.repostBucket - a.repostBucket); }
-function getConcentration(clips, products, days = 30) { const byProduct = {}; if (!Array.isArray(products)) return null; products.forEach(p => { const s = getProductSales(p, clips, days); if (s.primary > 0) byProduct[p.id] = s.primary; }); const totalGMV = Object.values(byProduct).reduce((s, v) => s + v, 0); if (totalGMV === 0) return null; const sorted = Object.entries(byProduct).sort((a, b) => b[1] - a[1]); if (!sorted || sorted.length === 0) return null; return { pct: Math.round((sorted[0][1] / totalGMV) * 100), product: products.find(p => p.id === sorted[0][0]), totalGMV }; }
+function getConcentration(clips, products, timeframe = 30) { const byProduct = {}; if (!Array.isArray(products)) return null; products.forEach(p => { const s = getProductSales(p, clips, timeframe); if (s.primary > 0) byProduct[p.id] = s.primary; }); const totalGMV = Object.values(byProduct).reduce((s, v) => s + v, 0); if (totalGMV === 0) return null; const sorted = Object.entries(byProduct).sort((a, b) => b[1] - a[1]); if (!sorted || sorted.length === 0) return null; return { pct: Math.round((sorted[0][1] / totalGMV) * 100), product: products.find(p => p.id === sorted[0][0]), totalGMV }; }
+
+// ✅ ดึงยอดขายรวมรายเดือนจากสมุดบัญชี (หลีกเลี่ยงการนับซ้ำกับคลิป)
+function getMonthlyGMV(products, clips, ymKey) {
+  let manualTotal = 0;
+  if (Array.isArray(products)) products.forEach(p => { manualTotal += (Number(p.salesData?.monthly?.[ymKey]) || 0); });
+  const mclips = Array.isArray(clips) ? clips.filter(c => c.postedAt?.startsWith(ymKey)) : [];
+  const vClipGmv = mclips.filter(c => c.isV).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
+  const clipGmv = mclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0);
+  // ถ้ายอดแมนนวลมีค่า แสดงว่าได้สแกนเรดาร์แล้ว -> เอายอดเรดาร์ + คลิป V (คลิปที่ไม่ได้ผูกตะกร้า)
+  return manualTotal > 0 ? manualTotal + vClipGmv : clipGmv;
+}
+
+// ✅ ดึงยอดขาย All-Time สะสมทั้งหมดของสินค้า โดยไขว้สมุดบัญชีเข้ากับคลิป
+function getAllTimeProductGMV(p, clips) { 
+  let total = 0; 
+  const ledger = p.salesData?.monthly || {}; 
+  const clipMonthly = {}; 
+  if (Array.isArray(clips)) { 
+    clips.filter(c => c.productId === p.id).forEach(c => { 
+      const ym = c.postedAt?.slice(0, 7); 
+      if (ym) clipMonthly[ym] = (clipMonthly[ym] || 0) + (Number(c.gmv) || 0); 
+    }); 
+  } 
+  const allMonths = new Set([...Object.keys(ledger), ...Object.keys(clipMonthly)]); 
+  allMonths.forEach(ym => { 
+    const mVal = Number(ledger[ym]) || 0; 
+    const cVal = Number(clipMonthly[ym]) || 0; 
+    total += Math.max(mVal, cVal); 
+  }); 
+  const active30d = Number(p.salesData?.last30d) || 0; 
+  return Math.max(total, active30d); 
+}
 
 function migrateProduct(p) { if (!p) return p; const sc = p.scorecard || {}; if (sc.gmv7d !== undefined && sc.gmv7dPct === undefined) { const { gmv7d, gmv30d, ...rest } = sc; p.scorecard = rest; const s = calcScore(p.scorecard); p.score = s.total; p.maxScore = s.max; p.scorePct = s.pct; p.decision = getDecision(s.pct); } return p; }
 function migrateClip(c) { if (!c) return c; if (c.views !== undefined && c.views7d === undefined) { c.views7d = c.views; delete c.views; } if (c.link !== undefined && c.videoLink === undefined) { c.videoLink = c.link; delete c.link; } return c; }
@@ -582,8 +639,20 @@ function VBar({ label, value, target, sub, suffix = "" }) {
 
 function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, appSettings, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone }) {
   const today = todayStr();
-  const clipsToday = clips.filter(c => c.postedAt?.slice(0, 10) === today);
-  const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
+  const currentMonthKey = currentMonth();
+  
+  // ✅ 1. คำนวณกำไรสุทธิเดือนนี้ จากสมุดบัญชี (Monthly Ledger) แม่นยำ 100%
+  const totalProfitMonth = useMemo(() => {
+    let total = 0; 
+    products.forEach(p => {
+      const manualGmv = Number(p.salesData?.monthly?.[currentMonthKey]) || Number(p.salesData?.last30d) || 0;
+      const clipGmv = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonthKey).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
+      const bestGmv = Math.max(manualGmv, clipGmv);
+      const comm = Number(p.scorecard?.commission) || 0;
+      total += (bestGmv * comm) / 100;
+    });
+    return total;
+  }, [products, clips, currentMonthKey]);
 
   const tiktokTotal30d = useMemo(() => products.reduce((s, p) => s + (Number(p.salesData?.last30d) || Number(p.salesData?.last7d) || 0), 0), [products]);
 
@@ -597,23 +666,22 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const uniqueProducts7d = new Set(last7DaysClips.filter(c => !c.isV).map(c => c.productId)).size;
   const avgPerDay = (totalClips7d / 7).toFixed(1);
 
+  // ✅ 2. Top Selling Products ดึงยอดขาย "ตลอดกาล" จากสมุดบัญชีรวมกับยอดวิวคลิป
   const topSellingProducts = useMemo(() => {
     if (!Array.isArray(products)) return [];
     return products.map(p => {
-      const productClips = clips.filter(c => c.productId === p.id);
-      return { product: p, gmv: productClips.reduce((sum, c) => sum + (Number(c.gmv) || 0), 0), commission: Number(p.scorecard?.commission || 0) };
+      return { product: p, gmv: getAllTimeProductGMV(p, clips), commission: Number(p.scorecard?.commission || 0) };
     }).filter(p => p.gmv > 0).sort((a, b) => b.gmv - a.gmv).slice(0, 3);
   }, [products, clips]);
 
+  // ✅ 3. กราฟ Capsule 12 เดือน ดึงยอดจาก Monthly Ledger ไม่ให้เดือนซ้อนทับกัน!
   const salesAnalyticsData = useMemo(() => {
     const currentYear = new Date().getFullYear();
-    const monthlyTotals = Array(12).fill(0);
-    clips.forEach(c => {
-      const date = new Date(c.postedAt);
-      if (date.getFullYear() === currentYear) monthlyTotals[date.getMonth()] += (Number(c.gmv) || 0);
+    return Array.from({ length: 12 }, (_, i) => {
+      const mStr = String(i + 1).padStart(2, '0');
+      return { label: mStr, value: getMonthlyGMV(products, clips, `${currentYear}-${mStr}`) };
     });
-    return Array.from({ length: 12 }, (_, i) => ({ label: String(i + 1).padStart(2, '0'), value: monthlyTotals[i] }));
-  }, [clips]);
+  }, [products, clips]);
 
   const statsPending = useMemo(() => getStatsPending(clips), [clips]);
   const concentration = useMemo(() => getConcentration(clips, products, 30), [clips, products]);
@@ -634,7 +702,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <OverviewKPI icon={DollarSign} label="Total Profit (Commission)" value={`฿${fmtNum(totalGMVMonth)}`} sub="สะสมภายในเดือนนี้" isPrimary={true} />
+        <OverviewKPI icon={DollarSign} label={`Est. Profit (เดือน ${currentMonthKey.split('-')[1]})`} value={`฿${fmtNum(Math.round(totalProfitMonth))}`} sub="ประเมินกำไรเดือนปัจจุบัน" isPrimary={true} />
         <OverviewKPI icon={User} label="Total Products (Port)" value={products.length} sub="รายการสินค้าในคลัง" />
         <OverviewKPI icon={Activity} label="Total Clips" value={clips.length} sub="คลิปสะสมทั้งหมดในระบบ" />
       </div>
@@ -1144,23 +1212,40 @@ function ClipLogPage({ products, clips, onEditClip }) {
 }
 
 function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeSimilar, onEditClip, onMarkRepostDone, onPromoteToA }) {
-  const [period, setPeriod] = useState('30'); const days = Number(period); const cutoff = Date.now() - days * 86400000; const recent = useMemo(() => clips.filter(c => new Date(c.postedAt).getTime() >= cutoff), [clips, cutoff]);
+  // ✅ ระบบเลือกแกนเวลา (Time Machine) - ค่าเริ่มต้นคือ 30 วันปัจจุบัน
+  const [period, setPeriod] = useState('30'); 
   
-  // ✅ ระบบแก้ไขเป้าหมายรายได้ (Dynamic Edit)
+  const recent = useMemo(() => {
+    if (period.includes('-')) return clips.filter(c => c.postedAt?.slice(0, 7) === period);
+    const days = Number(period) || 30; const cutoff = Date.now() - days * 86400000;
+    return clips.filter(c => new Date(c.postedAt).getTime() >= cutoff);
+  }, [clips, period]);
+
+  // ตัวเลือกเดือนย้อนหลัง
+  const monthOptions = useMemo(() => {
+    const opts = []; const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      opts.push({ value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' }) });
+    }
+    return opts;
+  }, []);
+  
   const revenueTarget = appSettings?.monthlyRevenueTarget || MONTHLY_REVENUE_TARGET;
   const [isEditingGoal, setIsEditingGoal] = useState(false);
   const [goalDraft, setGoalDraft] = useState(revenueTarget);
   useEffect(() => { setGoalDraft(revenueTarget); }, [revenueTarget]);
 
-  const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips, days), [products, clips, days]);
-  const eCandidates = useMemo(() => getECandidates(products, clips), [products, clips]);
-  const cutCandidates = useMemo(() => getProductsToCut(products, clips), [products, clips]);
-  const roi = useMemo(() => getROIAnalysis(products, clips, revenueTarget), [products, clips, revenueTarget]);
+  // ดึงข้อมูลทั้งหมดผ่านแว่นขยายของ "แกนเวลา (period)" ที่เราเลือกไว้!
+  const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips, period), [products, clips, period]);
+  const eCandidates = useMemo(() => getECandidates(products, clips, period), [products, clips, period]);
+  const cutCandidates = useMemo(() => getProductsToCut(products, clips, period), [products, clips, period]);
+  const roi = useMemo(() => getROIAnalysis(products, clips, revenueTarget, period), [products, clips, revenueTarget, period]);
 
-  // 🧠 1. สมองกล AI Recommendations ที่คุณเตรียมไว้ (ใส่ให้แล้ว!)
+  // 🧠 1. ฝังสมองกล AI Recommendations (วิเคราะห์แยกเวลาไม่ซ้อนทับอดีต)
   const recommendations = useMemo(() => {
     return products.map(p => {
-      const sales = getProductSales(p, clips, days);
+      const sales = getProductSales(p, clips, period);
       const tiktok = sales.fromManual;
       const clipCount = sales.clipCount;
       const clipGMV = sales.fromClips;
@@ -1170,33 +1255,18 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
       const clipCommRev = (clipGMV * commissionPct) / 100;
 
       if (sales.hasManual) {
-        // ⭐ กฎ 0 (ใหม่): กินบุญเก่า (Passive Income) - ไม่ได้ลงคลิปเลยใน 30 วัน แต่ได้ค่าคอม >= 500 บาท
         if (clipCount === 0 && commRev >= 500) return { product: p, rec: '💎 ขุดสมบัติ (Passive)', reason: `กินคอมฟรี ฿${fmtNum(Math.round(commRev))} จากคลิปเก่า/หน้าร้าน — รีบทำคลิปมุมใหม่เติมเชื้อไฟด่วน!`, color: 'bg-purple-600', icon: Sparkles, sortKey: 7 };
-
-        // กฎ 1: Cash Cow (ฟันค่าคอมทะลุ 1,000 แต่ลงคลิปน้อยกว่า 3 คลิป)
         if (commRev >= 1000 && clipCount < 3) return { product: p, rec: 'ดันด่วน', reason: `ฟันค่าคอม ฿${fmtNum(Math.round(commRev))} แต่ลงแค่ ${clipCount} คลิป — สับสคริปต์เพิ่มด่วน`, color: 'bg-rose-600', icon: Flame, sortKey: 6 };
-        
-        // กฎ 2: Hero Product (ค่าคอมสูง และลงคลิปต่อเนื่องแล้ว -> เลี้ยงกระแส)
         if (commRev >= 1000) return { product: p, rec: 'ดันต่อ', reason: `ตัวทำเงินหลัก (คอม ฿${fmtNum(Math.round(commRev))}) — เลี้ยงความถี่ไว้`, color: 'bg-emerald-500', icon: TrendingUp, sortKey: 5 };
-        
-        // กฎ 3: Volume/Traction (ยอดคอมเริ่มมา แต่คลิปน้อย)
         if (commRev >= 300 && clipCount < 3) return { product: p, rec: 'ลงเพิ่ม', reason: `ได้ค่าคอม ฿${fmtNum(Math.round(commRev))} กำลังมา — ขยี้คลิปเพิ่ม`, color: 'bg-amber-500', icon: Lightbulb, sortKey: 4 };
-        
-        // กฎ 4: Steady (ยอดเดินปกติ)
         if (commRev >= 300 || tiktok >= 5000) return { product: p, rec: 'ทำต่อ', reason: `ยอด GMV ฿${fmtNum(tiktok)} (คอม ฿${fmtNum(Math.round(commRev))})`, color: 'bg-sky-500', icon: Activity, sortKey: 3 };
-        
-        // กฎ 5: Testing (ยอดรวมพอเดินบ้าง แต่คอมยังน้อย)
         if (tiktok >= 1000) return { product: p, rec: 'ลองมุมใหม่', reason: `มียอด ฿${fmtNum(tiktok)} แต่คอมยังน้อย — หา Pain Point ใหม่`, color: 'bg-[#d97706]', icon: Wand2, sortKey: 2 };
-        
-        // กฎ 6: Dead end (ลงเกิน 3 คลิปแล้วยอดไม่เดิน -> สั่งเบรก)
         if (clipCount >= 4 && tiktok < 1000) return { product: p, rec: 'พักดูอาการ', reason: `ลงไป ${clipCount} คลิปยอดไม่เดิน — เซฟเวลาไปทำตัวอื่น`, color: 'bg-slate-500', icon: TrendingDown, sortKey: 1 };
         
         return null;
       }
 
-      // --- กรณีที่ยังไม่มียอดขายแมนนวล (อิงจากประวัติคลิปที่เคยกรอกในระบบล้วนๆ) ---
       if (clipCount === 0) return null;
-      
       const revPerClip = clipCount > 0 ? clipCommRev / clipCount : 0;
       
       if (revPerClip >= 300 && clipCount >= 2) return { product: p, rec: 'ดันต่อ', reason: `ได้ค่าคอมเฉลี่ย ฿${fmtNum(Math.round(revPerClip))}/คลิป — เอนจินทำงานดี`, color: 'bg-emerald-500', icon: TrendingUp, sortKey: 3 };
@@ -1205,13 +1275,27 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
       
       return { product: p, rec: 'เทสต่อ', reason: 'ยังต้องเก็บสถิติเพิ่ม', color: 'bg-slate-400', icon: Activity, sortKey: 0 };
     }).filter(Boolean).sort((a, b) => b.sortKey - a.sortKey);
-  }, [products, clips, days]);
+  }, [products, clips, period]);
 
+  // ✅ 2. อัปเกรดสถิติ ABCD ให้ดึงยอดขายจาก Filter วันที่ถูกต้อง
   const abcdStats = useMemo(() => {
     const stats = { A: { gmv: 0, count: 0 }, B: { gmv: 0, count: 0 }, C: { gmv: 0, count: 0 }, D: { gmv: 0, count: 0 } };
-    recent.filter(c => !c.isV).forEach(c => { const p = products.find(pp => pp.id === c.productId); if (p?.category && stats[p.category]) { stats[p.category].gmv += Number(c.gmv) || 0; stats[p.category].count += 1; } });
+    if (period.includes('-')) {
+      products.forEach(p => {
+        if (p.category && stats[p.category]) {
+           const mGmv = Number(p.salesData?.monthly?.[period]) || 0;
+           if (mGmv > 0) {
+             stats[p.category].gmv += mGmv;
+             stats[p.category].count += clips.filter(c => c.productId === p.id && c.postedAt?.slice(0,7) === period).length;
+           }
+        }
+      });
+    } else {
+      recent.filter(c => !c.isV).forEach(c => { const p = products.find(pp => pp.id === c.productId); if (p?.category && stats[p.category]) { stats[p.category].gmv += Number(c.gmv) || 0; stats[p.category].count += 1; } });
+    }
     return stats;
-  }, [products, recent]);
+  }, [products, clips, recent, period]);
+
   const maxCategoryGmv = Math.max(...Object.values(abcdStats).map(s => s.gmv), 1);
 
   const pillarStats = useMemo(() => {
@@ -1221,18 +1305,41 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
   }, [recent]);
   const maxPillarCount = Math.max(...Object.values(pillarStats), 1);
 
+  // ✅ 3. อัปเกรดกราฟ 6 เดือนย้อนหลัง ดึง GMV จริงๆ จากสมุดบัญชี (Monthly Ledger)
   const monthlyTrend = useMemo(() => {
     const months = []; const now = new Date();
     for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1); const ymKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; const mclips = clips.filter(c => c.postedAt?.slice(0, 7) === ymKey);
-      months.push({ key: ymKey, label: d.toLocaleDateString('th-TH', { month: 'short' }), clipCount: mclips.length, gmv: mclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0) });
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1); 
+      const ymKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; 
+      const mclips = clips.filter(c => c.postedAt?.slice(0, 7) === ymKey);
+      months.push({ key: ymKey, label: d.toLocaleDateString('th-TH', { month: 'short' }), clipCount: mclips.length, gmv: getMonthlyGMV(products, clips, ymKey) });
     }
     return months;
-  }, [clips]);
+  }, [clips, products]);
+
   const maxMonthlyClips = Math.max(...monthlyTrend.map(m => m.clipCount), 1); const maxMonthlyGmv = Math.max(...monthlyTrend.map(m => m.gmv), 1);
 
   return (
     <div className="space-y-6">
+      
+      {/* 🚀 แผงเลือกไทม์แมชชีน (Time Filter) */}
+      <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-3 rounded-3xl border border-slate-100 shadow-sm gap-3 relative z-20">
+        <div className="flex items-center gap-2 pl-2">
+          <CalendarDays className="w-5 h-5 text-emerald-600" />
+          <span className="text-sm font-bold text-[#012b25]">เลือกข้อมูลประจำช่วงเวลา:</span>
+        </div>
+        <select value={period} onChange={e => setPeriod(e.target.value)} className="bg-[#f3f6f5] border border-slate-200 text-sm font-bold px-5 py-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer text-[#012b25] appearance-none shadow-sm min-w-[200px]">
+          <optgroup label="ยอดปัจจุบัน (Rolling Window)">
+            <option value="30">30 วันล่าสุด (Current)</option>
+            <option value="7">7 วันล่าสุด (Current)</option>
+            <option value="90">90 วันล่าสุด (Current)</option>
+          </optgroup>
+          <optgroup label="สมุดบัญชีรายเดือน (Ledger)">
+            {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </optgroup>
+        </select>
+      </div>
+
       <div className="bg-[#012b25] text-white rounded-3xl p-6 md:p-8 shadow-xl border border-[#043d34] space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div><h3 className="font-display text-lg text-lime-400 flex items-center gap-2"><Target className="w-5 h-5" /> Strategic Target Planner</h3><p className="text-xs text-emerald-300 mt-1">คำนวณจำนวนสินค้าที่ต้องขายคนเดียวเพื่อพิชิตเป้าหมายรายเดือน</p></div>
@@ -1254,12 +1361,12 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
         </div>
 
         <div className="bg-[#033c32] p-5 rounded-2xl border border-[#065345] grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ประมาณการคอมมิชชันปัจจุบัน</span><span className="font-display text-xl text-white">฿{fmtNum(Math.round(roi.totalCommRevenue))}</span></div>
+          <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ประมาณการคอมมิชชันที่เลือก</span><span className="font-display text-xl text-white">฿{fmtNum(Math.round(roi.totalCommRevenue))}</span></div>
           <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ความคืบหน้า</span><span className="font-display text-xl text-[#bcd924]">{roi.pct}%</span></div>
           <div><span className="text-[10px] text-emerald-300 font-bold block uppercase tracking-wider">ยอดเงินที่ยังขาด</span><span className="font-display text-xl text-rose-400">฿{fmtNum(Math.round(roi.gap))}</span></div>
         </div>
         <div className="space-y-2.5">
-          <span className="text-xs font-bold text-emerald-200 uppercase tracking-wider block">📊 จำนวนชิ้นที่ต้องการขายคนเดียวแยกรายสินค้าเพื่อบรรลุเป้า:</span>
+          <span className="text-xs font-bold text-emerald-200 uppercase tracking-wider block">📊 จำนวนชิ้นที่ต้องการขายแยกรายสินค้าเพื่อบรรลุเป้าหมาย:</span>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-1">
             {roi.items.map(i => {
               const unitsNeeded = i.commPerOrder > 0 ? Math.ceil(revenueTarget / i.commPerOrder) : 0;
@@ -1274,15 +1381,13 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
         </div>
       </div>
 
-      <div className="flex justify-end gap-1.5 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm self-end">{['7', '30', '90'].map(d => (<button key={d} onClick={() => setPeriod(d)} className={`text-xs font-bold px-4 py-2 rounded-xl border transition-all ${period === d ? 'bg-[#012b25] text-white border-transparent' : 'bg-slate-50 text-slate-500'}`}>{d} วันล่าสุด</button>))}</div>
-
-      {/* ✅ 2. กระดาน UI แสดงผล AI Recommendations ที่เพิ่มเข้ามา */}
+      {/* ✅ แผง Recommendations พร้อมทำงาน! */}
       {recommendations && recommendations.length > 0 && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Wand2 className="w-5 h-5 text-purple-600" /> AI Action Plan (เข็มทิศสั่งการประจำวัน)</h3>
           </div>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">วิเคราะห์ความคุ้มค่าจาก กำไรค่าคอมมิชชัน VS ความถี่การลงคลิป ({period} วันล่าสุด)</p>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">วิเคราะห์ความคุ้มค่าจาก กำไรค่าคอมมิชชัน VS ความถี่การลงคลิป {period.includes('-') ? `(ข้อมูลบัญชีเดือน ${period})` : `(${period} วันล่าสุด)`}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             {recommendations.map((rec) => {
               const Icon = rec.icon;
@@ -1307,7 +1412,7 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
       {portfolioBalance && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Target className="w-4 h-4 text-emerald-800" /> ตรวจสอบสมดุลสัดส่วนช่อง (Portfolio Balance Target)</h3>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">เป้าหมายมาตรฐาน: A {PORTFOLIO_TARGET.A}% / B {PORTFOLIO_TARGET.B}% / C {PORTFOLIO_TARGET.C}% / D {PORTFOLIO_TARGET.D}% (คำนวณจากยอด GMV {period} วันล่าสุด)</p>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">เป้าหมายมาตรฐาน: A {PORTFOLIO_TARGET.A}% / B {PORTFOLIO_TARGET.B}% / C {PORTFOLIO_TARGET.C}% / D {PORTFOLIO_TARGET.D}%</p>
           <div className="space-y-4 pt-1">
             {Object.entries(portfolioBalance).map(([k, b]) => {
               const info = getAbcdInfo(k); const statusColors = b.status === 'ok' ? 'bg-[#1d7c2a]' : 'bg-[#d97706]';
@@ -1386,7 +1491,7 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
       </div>
 
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-        <h3 className="font-display text-base text-[#012b25]">📅 เปรียบเทียบปริมาณคลิป และ ยอด GMV ตลอด 6 เดือนย้อนหลัง</h3>
+        <h3 className="font-display text-base text-[#012b25]">📅 เปรียบเทียบปริมาณคลิป และ ยอด GMV (จากสมุดบัญชี 6 เดือนย้อนหลัง)</h3>
         <div className="grid grid-cols-6 gap-3 pt-4">
           {monthlyTrend.map(m => {
             const clipH = Math.max(2, Math.round((m.clipCount / maxMonthlyClips) * 60));
