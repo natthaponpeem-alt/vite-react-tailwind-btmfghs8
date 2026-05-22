@@ -74,7 +74,6 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).substr(2,
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 const daysSince = (iso) => !iso ? 999 : Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-const daysUntilRescore = (iso) => RESCORE_DAYS - daysSince(iso);
 const fmtDate = (iso) => { if (!iso) return '-'; const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${(d.getFullYear() + 543).toString().slice(2)}`; };
 const fmtNum = (n) => (n ?? 0).toLocaleString('th-TH');
 const truncate = (s, n) => !s ? '' : s.length > n ? s.slice(0, n) + '…' : s;
@@ -116,7 +115,6 @@ function calcScore(sc = {}) {
 
 function getDecision(pct) { return pct >= PICK_THRESHOLD ? 'PICK' : pct >= WAIT_THRESHOLD ? 'WAIT' : 'DROP'; }
 
-// อัปเกรด Auto-Classify ให้สมบูรณ์แบบ (เพิ่มกฎ rank > 20)
 function autoClassify({ gmv30d, commission, tiktokRank, price }) { 
   const g = Number(gmv30d) || 0; const c = Number(commission) || 0; const rank = Number(tiktokRank) || 0; const pr = Number(price) || 0; 
   if (g >= 30000) { if (c >= 15) return { cat: 'A', label: 'A — ideal', reason: 'Mass + คอมดี = A ideal', confidence: 'high' }; return { cat: 'A', label: 'A (proven exception)', reason: 'Mass = ฐานรายได้แม้คอมต่ำ', confidence: 'high' }; } 
@@ -134,12 +132,14 @@ function getCategoryStack(products, clips, category) { if (!Array.isArray(produc
 function getECandidates(products, clips) { if (!Array.isArray(products)) return []; return products.map(p => { if (p.category === 'A') return null; if (daysSince(p.createdAt) < 14) return null; const sales30d = getProductSales(p, clips, 30).primary; const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length; const rank = Number(p.tiktokRank) || 0; const commission = Number(p.scorecard?.commission || 0); let eScore = 0; const reasons = []; if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)} (mass)`); } else if (sales30d >= 10000) { eScore += 1; reasons.push(`GMV ฿${fmtNum(sales30d)}`); } if (winnerCount >= 2) { eScore += 2; reasons.push(`${winnerCount} winner clips`); } else if (winnerCount === 1) { eScore += 1; reasons.push('1 winner clip'); } if (rank > 0 && rank <= 10) { eScore += 1; reasons.push(`Top #${rank} ตลาด`); } if (commission >= 15) { eScore += 1; reasons.push(`คอม ${commission}% ดี`); } if (p.isShopAds) { eScore += 1; reasons.push('Shop Ads 🛒'); } if (eScore < 2) return null; let confidence, advice; if (eScore >= 5) { confidence = 'high'; advice = 'ย้ายเป็น A เพื่อขยี้คอนเทนต์'; } else if (eScore >= 3) { confidence = 'medium'; advice = 'พิจารณาย้าย / เทสต่อ 1-2 wk'; } else { confidence = 'low'; advice = 'มี signal เริ่มต้น — เทสต่อ'; } return { product: p, eScore, confidence, reasons, sales30d, winnerCount, advice }; }).filter(Boolean).sort((a, b) => b.eScore - a.eScore); }
 function getROIAnalysis(products, clips, monthlyTargetGMV) { if (!Array.isArray(products)) return { items: [], totalCommRevenue: 0, gap: monthlyTargetGMV, pct: 0 }; const items = products.map(p => { const sales30d = getProductSales(p, clips, 30).primary; const commission = Number(p.scorecard?.commission || 0); const price = Number(p.price) || 0; const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0; const currentCommRevenue = sales30d * commission / 100; const ordersNeededAlone = commPerOrder > 0 ? Math.ceil(monthlyTargetGMV / commPerOrder) : null; return { product: p, sales30d, commission, price, commPerOrder, currentCommRevenue, ordersNeededAlone }; }).filter(i => i.sales30d > 0 || i.commPerOrder > 0).sort((a, b) => b.currentCommRevenue - a.currentCommRevenue); const totalCommRevenue = items.reduce((s, i) => s + i.currentCommRevenue, 0); return { items, totalCommRevenue, gap: Math.max(0, monthlyTargetGMV - totalCommRevenue), pct: monthlyTargetGMV > 0 ? Math.round((totalCommRevenue / monthlyTargetGMV) * 100) : 0 }; }
 function getProductsToCut(products, clips) { if (!Array.isArray(products)) return []; return products.map(p => { const reasons = []; const commission = Number(p.scorecard?.commission || 0); const sales = getProductSales(p, clips, 30); if (commission > 0 && commission <= 5 && sales.primary < 30000) reasons.push(`คอม ${commission}% ≤5%`); if (p.scorePct && p.maxScore >= 12 && p.scorePct < WAIT_THRESHOLD) reasons.push(`Argoon ${p.score}/${p.maxScore} = CUT`); const g7 = Number(p.scorecard?.gmv7dPct); const g30 = Number(p.scorecard?.gmv30dPct); if (!isNaN(g7) && !isNaN(g30) && g7 < -20 && g30 < -20) reasons.push(`GMV ตกหนัก ${g7}% / ${g30}%`); if (daysSince(p.createdAt) >= 14 && sales.primary === 0 && sales.clipCount === 0) reasons.push('ไม่มีกิจกรรม 30d'); if (reasons.length === 0) return null; return { product: p, reasons, severity: reasons.length }; }).filter(Boolean).sort((a, b) => b.severity - a.severity); }
-function getRevenuePerClip(productId, clips, days = 7) { if (!Array.isArray(clips)) return { revPerClip: 0, totalGMV: 0, clipCount: 0 }; const cutoff = Date.now() - days * 86400000; const pclips = clips.filter(c => c.productId === productId && new Date(c.postedAt).getTime() >= cutoff); if (pclips.length === 0) return { revPerClip: 0, totalGMV: 0, clipCount: 0 }; const totalGMV = pclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); return { revPerClip: totalGMV / pclips.length, totalGMV, clipCount: pclips.length }; }
 function getProductSales(product, clips, days) { if (!product) return { fromClips: 0, fromManual: 0, hasManual: false, clipCount: 0, primary: 0 }; const cutoff = Date.now() - days * 86400000; const fromClips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).reduce((s, c) => s + (Number(c.gmv) || 0), 0) : 0; const clipCount = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff).length : 0; const fromManual = days <= 7 ? (Number(product.salesData?.last7d) || 0) : (Number(product.salesData?.last30d) || 0); return { fromClips, fromManual, hasManual: fromManual > 0, clipCount, primary: fromManual || fromClips }; }
 function getBestAngle(product, clips) { if (!product?.angles?.length || !Array.isArray(clips)) return null; const stats = product.angles.map(angle => { const aclips = clips.filter(c => c.angleId === angle.id); const totalGMV = aclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); return { angle, count: aclips.length, totalGMV, avg: aclips.length > 0 ? totalGMV / aclips.length : 0 }; }).filter(s => s.count >= 1).sort((a, b) => b.avg - a.avg); return stats[0] || null; }
 function getWinners(clips, products) { if (!Array.isArray(clips)) return []; return clips.filter(c => (Number(c.gmv) || 0) >= WINNER_GMV).map(c => ({ clip: c, product: Array.isArray(products) ? products.find(p => p.id === c.productId) : null, daysOld: daysSince(c.postedAt) })).sort((a, b) => (Number(b.clip.gmv) || 0) - (Number(a.clip.gmv) || 0)); }
 function getRepostCandidates(clips, products) { return getWinners(clips, products).map(w => { const rs = w.clip.repostStatus || {}; let bucket = null; if (w.daysOld >= 30 && !rs.d30) bucket = 30; else if (w.daysOld >= 14 && !rs.d14) bucket = 14; else if (w.daysOld >= 7 && !rs.d7) bucket = 7; return bucket ? { ...w, repostBucket: bucket } : null; }).filter(Boolean).sort((a, b) => b.repostBucket - a.repostBucket); }
 function getConcentration(clips, products, days = 30) { const byProduct = {}; if (!Array.isArray(products)) return null; products.forEach(p => { const s = getProductSales(p, clips, days); if (s.primary > 0) byProduct[p.id] = s.primary; }); const totalGMV = Object.values(byProduct).reduce((s, v) => s + v, 0); if (totalGMV === 0) return null; const sorted = Object.entries(byProduct).sort((a, b) => b[1] - a[1]); if (!sorted || sorted.length === 0) return null; return { pct: Math.round((sorted[0][1] / totalGMV) * 100), product: products.find(p => p.id === sorted[0][0]), totalGMV }; }
+
+function migrateProduct(p) { if (!p) return p; const sc = p.scorecard || {}; if (sc.gmv7d !== undefined && sc.gmv7dPct === undefined) { const { gmv7d, gmv30d, ...rest } = sc; p.scorecard = rest; const s = calcScore(p.scorecard); p.score = s.total; p.maxScore = s.max; p.scorePct = s.pct; p.decision = getDecision(s.pct); } return p; }
+function migrateClip(c) { if (!c) return c; if (c.views !== undefined && c.views7d === undefined) { c.views7d = c.views; delete c.views; } if (c.link !== undefined && c.videoLink === undefined) { c.videoLink = c.link; delete c.link; } return c; }
 
 // ============================================================================
 // [ZONE 3] MAIN APPLICATION & CLOUD LIFECYCLE (Pharmly Architecture)
@@ -153,7 +153,7 @@ export default function App() {
   
   const [products, setProducts] = useState([]);
   const [clips, setClips] = useState([]);
-  const [monthlyTarget, setMonthlyTarget] = useState(DEFAULT_MONTHLY_CLIP_TARGET);
+  const [appSettings, setAppSettings] = useState({ monthlyTarget: DEFAULT_MONTHLY_CLIP_TARGET, noticeBoard: '' });
   
   const [toast, setToast] = useState(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -166,7 +166,6 @@ export default function App() {
   const [editClipId, setEditClipId] = useState(null);
   const [clipForVOnly, setClipForVOnly] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [migrationLog, setMigrationLog] = useState(null);
 
   const [confirmDeleteProdId, setConfirmDeleteProdId] = useState(null);
   const [confirmDeleteClipId, setConfirmDeleteClipId] = useState(null);
@@ -182,14 +181,18 @@ export default function App() {
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // --- Subcollections Sync ---
   useEffect(() => {
     if (!user) return;
     setIsSyncing(true);
 
     const settingsRef = doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings');
     const unsubSettings = onSnapshot(settingsRef, (snap) => {
-      if (snap.exists()) setMonthlyTarget(snap.data().monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET);
+      if (snap.exists()) {
+        setAppSettings({
+          monthlyTarget: snap.data().monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET,
+          noticeBoard: snap.data().noticeBoard || ''
+        });
+      }
     });
 
     const prodColRef = collection(db, 'artifacts', APP_ID, 'users', user.uid, 'products');
@@ -223,6 +226,11 @@ export default function App() {
     return obj;
   };
 
+  const updateSettingsInCloud = async (patch) => {
+    setAppSettings(prev => ({ ...prev, ...patch }));
+    await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings'), patch, { merge: true });
+  };
+
   const updateProductInCloud = async (id, data) => {
     if (!user) return;
     await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', id), sanitizeForFirestore(data), { merge: true });
@@ -249,7 +257,7 @@ export default function App() {
     }
     setPage('products'); 
     setConfirmDeleteProdId(null);
-    showToast(`ลบแฟ้มสินค้าและคลิป (${relatedClips.length}) ถาวรเรียบร้อย`);
+    showToast(`ลบสินค้าและคลิป (${relatedClips.length}) ถาวรเรียบร้อย`);
   };
 
   const executeDeleteClip = async (id) => {
@@ -285,23 +293,23 @@ export default function App() {
     await updateClip(clipId, { repostStatus: rs });
   };
 
-  const handleLegacyMigration = async (jsonData) => {
-    if (!user) return;
-    setMigrationLog("กำลังเริ่มต้นรื้อถอนและย้ายสิทธิ์ข้อมูล...");
-    try {
-      const parsed = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-      if (!parsed.products && !parsed.clips) { showToast("รูปแบบไฟล์สำรองไม่ถูกต้อง", "error"); return; }
-      if (parsed.monthlyTarget) { await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings'), { monthlyTarget: parsed.monthlyTarget }); }
-      let pCount = 0;
-      for (const p of parsed.products) { await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', p.id), sanitizeForFirestore(p)); pCount++; }
-      let cCount = 0;
-      for (const c of parsed.clips) { await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id), sanitizeForFirestore(c)); cCount++; }
-      setMigrationLog(`🎉 สำเร็จ! ย้ายฐานข้อมูลเข้ากล่องใหม่เรียบร้อย: สินค้า ${pCount} รายการ, คลิป ${cCount} คลิป`);
-      showToast("ระบบอัพเกรดสำเร็จ!");
-    } catch (e) {
-      setMigrationLog(`❌ พัง: ${e.message}`);
-      showToast("ย้ายข้อมูลขัดข้อง", "error");
-    }
+  const importData = (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.products && data.clips) {
+           showToast('กำลังย้ายข้อมูลขึ้นระบบ Subcollections...', 'success');
+           const newP = data.products.map(migrateProduct);
+           const newC = data.clips.map(migrateClip);
+           for (const p of newP) await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', p.id), sanitizeForFirestore(p));
+           for (const c of newC) await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id), sanitizeForFirestore(c));
+           showToast('Import ข้อมูลขึ้นคลาวด์สำเร็จแล้ว!', 'success');
+        }
+      } catch { showToast('ไฟล์ JSON ผิดพลาด', 'error'); }
+    };
+    reader.readAsText(file);
   };
 
   const selectedProduct = selectedProductId ? products.find(p => p.id === selectedProductId) : null;
@@ -344,8 +352,8 @@ export default function App() {
               { id: 'home', label: 'Overview', icon: Home },
               { id: 'products', label: 'Products', icon: Package },
               { id: 'lock', label: 'Lock Focus', icon: Lock },
-              { id: 'analytics', label: 'Analytics (วิเคราะห์พอร์ต)', icon: BarChart3 },
-              { id: 'log', label: 'Clip Logs (คลังวิดีโอ)', icon: Database }
+              { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+              { id: 'log', label: 'Clip Logs', icon: Database }
             ].map(item => {
               const Icon = item.icon; const active = page === item.id;
               return (
@@ -362,12 +370,16 @@ export default function App() {
             <div className="absolute -right-8 -top-8 w-24 h-24 bg-[#d9eb54]/5 rounded-full" />
             <div className="w-8 h-8 rounded-full bg-[#d9eb54]/10 border border-[#d9eb54]/20 flex items-center justify-center mb-3"><Trophy className="w-4 h-4 text-[#d9eb54]" /></div>
             <h4 className="font-display text-sm font-bold text-white leading-tight">Upgrade Pro</h4>
-            <p className="text-[10px] text-emerald-300/70 mt-1 leading-relaxed">ปลดล็อคโมดูลคำนวณและสถิติกราฟ AI ปั่นสคริปต์ได้ไม่จำกัด</p>
+            <p className="text-[10px] text-emerald-300/70 mt-1 leading-relaxed">ปลดล็อค AI ปั่นสคริปต์ไม่จำกัด</p>
             <button className="w-full bg-[#d9eb54] text-[#012b25] text-xs font-bold py-2.5 rounded-xl transition-all shadow-md mt-4 hover:bg-[#eaf96c]">Upgrade Now</button>
           </div>
           <div className="flex gap-2 text-xs">
             <button onClick={() => { setClipForVOnly(true); setShowAddClip(true); }} className="flex-1 bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold py-3 rounded-2xl transition-all shadow-md flex items-center justify-center gap-1">+ บันทึกคลิป</button>
-            <button onClick={() => setShowSettings(true)} className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white transition-all"><Settings className="w-4 h-4" /></button>
+            <label className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white hover:bg-[#044c40] transition-all cursor-pointer shadow-md flex items-center justify-center" title="อัปโหลดไฟล์แบคอัป JSON (Import)">
+              <Upload className="w-4 h-4" />
+              <input type="file" accept="application/json" onChange={importData} className="hidden" />
+            </label>
+            <button onClick={() => setShowSettings(true)} className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white hover:bg-[#044c40] transition-all shadow-md" title="การตั้งค่าระบบ"><Settings className="w-4 h-4" /></button>
           </div>
         </div>
       </aside>
@@ -393,7 +405,7 @@ export default function App() {
         </header>
 
         <div className="p-6 md:p-8 space-y-8">
-          {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} monthlyTarget={monthlyTarget} onSetMonthlyTarget={(val) => setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings'), { monthlyTarget: val }, { merge: true })} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
+          {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
@@ -406,14 +418,14 @@ export default function App() {
       {showAddProduct && <AddProductModal onClose={() => setShowAddProduct(false)} onSave={addProduct} showGateWarning={(data) => setShowGateWarning(data)} showToast={showToast} />}
       {editScoreProductId && <EditScoreModal product={products.find(p => p.id === editScoreProductId)} onClose={() => setEditScoreProductId(null)} onSave={async (sc) => { await updateProductScore(editScoreProductId, sc); setEditScoreProductId(null); }} />}
       {editProductInfoId && <EditProductInfoModal product={products.find(p => p.id === editProductInfoId)} onClose={() => setEditProductInfoId(null)} onSave={async (patch) => { await updateProductInCloud(editProductInfoId, patch); setEditProductInfoId(null); showToast('อัปเดตสเปกสินค้าแล้ว'); }} />}
-      {showAddPain && selectedProduct && <AddPainModal onClose={() => setShowAddPain(false)} onSave={async (text, source) => { await addPain(selectedProduct.id, text, source); setShowAddPain(false); }} />}
-      {showAddAngle && selectedProduct && <AddAngleModal onClose={() => setShowAddAngle(false)} onSave={async (text) => { await addAngle(selectedProduct.id, text); setShowAddAngle(false); }} />}
-      {showLockProduct && selectedProduct && <LockProductModal product={selectedProduct} onClose={() => setShowLockProduct(false)} onSave={async (target, angles) => { await lockProduct(selectedProduct.id, target, angles); setShowLockProduct(false); }} />}
+      {showAddPain && selectedProduct && <AddPainModal onClose={() => setShowAddPain(false)} onSave={async (text, source) => { await updateProductInCloud(selectedProduct.id, { pains: [...(selectedProduct.pains || []), { id: uid(), text, source, createdAt: new Date().toISOString() }] }); setShowAddPain(false); showToast('เพิ่ม Pain Point สำเร็จ'); }} />}
+      {showAddAngle && selectedProduct && <AddAngleModal onClose={() => setShowAddAngle(false)} onSave={async (text) => { await updateProductInCloud(selectedProduct.id, { angles: [...(selectedProduct.angles || []), { id: uid(), text, createdAt: new Date().toISOString() }] }); setShowAddAngle(false); showToast('เพิ่ม Angle สำเร็จ'); }} />}
+      {showLockProduct && selectedProduct && <LockProductModal product={selectedProduct} onClose={() => setShowLockProduct(false)} onSave={async (target, angles) => { await updateProductInCloud(selectedProduct.id, { locked: { month: currentMonth(), targetClips: target, anglesToTest: angles, lockedAt: new Date().toISOString() } }); setShowLockProduct(false); showToast('ตรึงเป้าหมาย Lock List สำเร็จ'); }} />}
       {showAddClip && <AddClipModal products={products} defaultProductId={!clipForVOnly && selectedProduct ? selectedProduct.id : null} onClose={() => setShowAddClip(false)} onSave={async (data) => { await addClip(data); setShowAddClip(false); }} showToast={showToast} />}
       {editClipId && <EditClipModal clip={clips.find(c => c.id === editClipId)} products={products} onClose={() => setEditClipId(null)} onSave={async (patch) => { await updateClip(editClipId, patch); setEditClipId(null); }} onDelete={() => setConfirmDeleteClipId(editClipId)} />}
       {makeSimilarClip && <MakeSimilarModal clip={makeSimilarClip} products={products} onClose={() => setMakeSimilarClip(null)} />}
       {showBackup && <BackupModal products={products} clips={clips} onClose={() => setShowBackup(false)} showToast={showToast} />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onExport={() => { setShowSettings(false); setShowBackup(true); }} migrationLog={migrationLog} onMigrate={handleLegacyMigration} onClearAll={() => setConfirmClearDb(true)} />}
+      {showSettings && <SettingsModal appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onClose={() => setShowSettings(false)} onExport={() => { setShowSettings(false); setShowBackup(true); }} onClearAll={() => setConfirmClearDb(true)} />}
 
       {/* OVERLAYS */}
       {confirmDeleteProdId && (
@@ -544,7 +556,7 @@ function VBar({ label, value, target, sub, suffix = "" }) {
   );
 }
 
-function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, monthlyTarget, onSetMonthlyTarget, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone }) {
+function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, appSettings, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone }) {
   const today = todayStr();
   const clipsToday = clips.filter(c => c.postedAt?.slice(0, 10) === today);
   const totalGMVMonth = clips.filter(c => c.postedAt?.slice(0, 7) === currentMonth()).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
@@ -586,6 +598,17 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 
   return (
     <div className="space-y-8">
+      {/* Notice Board (ดึงจากหน้า Settings) */}
+      {appSettings?.noticeBoard && (
+        <div className="bg-gradient-to-r from-[#012b25] to-[#034c40] rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.12)] text-white flex items-start gap-4">
+          <div className="p-3 bg-[#d9eb54] text-[#012b25] rounded-2xl flex-shrink-0 shadow-inner"><Lightbulb className="w-6 h-6" /></div>
+          <div>
+            <h3 className="font-display text-lg text-[#d9eb54] mb-1.5 flex items-center gap-2">Weekly Strategy Notice</h3>
+            <p className="text-sm text-emerald-50/90 whitespace-pre-wrap leading-relaxed">{appSettings.noticeBoard}</p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <OverviewKPI icon={DollarSign} label="Total Profit (Commission)" value={`฿${fmtNum(totalGMVMonth)}`} sub="สะสมภายในเดือนนี้" isPrimary={true} />
         <OverviewKPI icon={User} label="Total Products (Port)" value={products.length} sub="รายการสินค้าในคลัง" />
@@ -986,41 +1009,105 @@ function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlo
 }
 
 function ClipLogPage({ products, clips, onEditClip }) {
-  const [search, setSearch] = useState(''); const [period, setPeriod] = useState('30'); const [sortOrder, setSortOrder] = useState('desc');
+  const [search, setSearch] = useState(''); 
+  const [period, setPeriod] = useState('30'); 
+  const [sortOrder, setSortOrder] = useState('date_desc');
+  const [filterProduct, setFilterProduct] = useState('');
+  const [filterABCD, setFilterABCD] = useState('');
+  const [filterPillar, setFilterPillar] = useState('');
+  const [filterType, setFilterType] = useState('');
+
   const filtered = useMemo(() => {
     if (!Array.isArray(clips)) return [];
-    return clips.filter(c => {
+    let list = clips.filter(c => {
       if (search && !c.hook?.toLowerCase().includes(search.toLowerCase())) return false;
       if (period !== 'all') { const cutoff = Date.now() - Number(period) * 86400000; if (new Date(c.postedAt).getTime() < cutoff) return false; }
+      if (filterProduct === 'V') { if (!c.isV) return false; } else if (filterProduct && c.productId !== filterProduct) return false;
+      if (filterABCD) { if (c.isV) { if (filterABCD !== 'V') return false; } else { const p = products.find(pp => pp.id === c.productId); if (p?.category !== filterABCD) return false; } }
+      if (filterPillar && c.pillarId !== filterPillar) return false;
+      if (filterType) { if (c.isV) return false; const p = products.find(pp => pp.id === c.productId); if (p?.productType !== filterType) return false; }
       return true;
-    }).sort((a, b) => {
-      const timeA = new Date(a.postedAt).getTime(); const timeB = new Date(b.postedAt).getTime();
-      return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
     });
-  }, [clips, search, period, sortOrder]);
+
+    list.sort((a, b) => {
+      if (sortOrder === 'date_desc') return new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime();
+      if (sortOrder === 'date_asc') return new Date(a.postedAt).getTime() - new Date(b.postedAt).getTime();
+      if (sortOrder === 'gmv_desc') return (Number(b.gmv) || 0) - (Number(a.gmv) || 0);
+      if (sortOrder === 'views7d_desc') return (Number(b.views7d) || 0) - (Number(a.views7d) || 0);
+      return 0;
+    });
+    return list;
+  }, [clips, products, search, period, filterProduct, filterABCD, filterPillar, filterType, sortOrder]);
+
+  const totalGMV = filtered.reduce((s, c) => s + (Number(c.gmv) || 0), 0);
+  const winners = filtered.filter(c => (Number(c.gmv) || 0) >= WINNER_GMV).length;
 
   return (
-    <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h3 className="font-display text-base text-[#012b25]">📋 ประวัติ Logs รายชิ้นงาน</h3>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')} className="flex items-center gap-1.5 text-xs font-bold bg-[#f3f6f5] hover:bg-slate-200 px-3.5 py-2 rounded-xl text-[#012b25] transition-all"><ArrowUpDown className="w-3.5 h-3.5" /><span>เรียง: {sortOrder === 'desc' ? 'ลงหลังสุดขึ้นก่อน' : 'ลงเก่าสุดขึ้นก่อน'}</span></button>
-          <div className="flex gap-1">{['7', '30', 'all'].map(p => (<button key={p} onClick={() => setPeriod(p)} className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border ${period === p ? 'bg-[#012b25] text-white border-transparent' : 'bg-slate-50 text-slate-600'}`}>{p === 'all' ? 'ทั้งหมด' : `${p} วันล่าสุด`}</button>))}</div>
-        </div>
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <OverviewKPI icon={Activity} label="คลิปที่กรองได้" value={filtered.length} sub="รายการวิดีโอ" />
+        <OverviewKPI icon={DollarSign} label="GMV รวม" value={`฿${fmtNum(totalGMV)}`} sub="จากคลิปเหล่านี้" />
+        <OverviewKPI icon={Trophy} label="Winners" value={winners} sub="คลิปทำเงิน ≥฿1k" />
+        <OverviewKPI icon={Database} label="สัดส่วน V-Content" value={`${filtered.length > 0 ? Math.round((filtered.filter(c=>c.isV).length / filtered.length)*100) : 0}%`} sub="จากรายการที่กรอง" />
       </div>
-      <div className="relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clip hook..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs border-collapse text-slate-600">
-          <thead><tr className="bg-slate-50/80 font-bold border-b border-slate-100 text-slate-400 uppercase text-[10px] tracking-wider"><th className="p-3 cursor-pointer hover:text-slate-800 transition-colors" onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}>วันที่ลง {sortOrder === 'desc' ? '▼' : '▲'}</th><th className="p-3">สินค้าหลัก</th><th className="p-3">สคริปต์ Hook</th><th className="p-3 text-right">Views 7d</th><th className="p-3 text-right">GMV สรุป</th></tr></thead>
-          <tbody className="divide-y divide-slate-50">
-            {filtered.map(c => {
-              const prod = products.find(p=>p.id === c.productId);
-              return (
-                <tr key={c.id} onClick={() => onEditClip(c.id)} className="hover:bg-slate-50/50 cursor-pointer transition-colors text-slate-700"><td className="p-3 whitespace-nowrap font-mono">{fmtDate(c.postedAt)}</td><td className="p-3 font-semibold text-slate-900 truncate max-w-[120px]">{c.isV ? '📚 สาระความรู้ (V)' : (prod?.name || '-')}</td><td className="p-3 truncate max-w-[180px] text-slate-500 font-medium">{c.hook || '-'}</td><td className="p-3 text-right font-mono font-medium">{fmtNum(c.views7d)}</td><td className="p-3 text-right font-mono font-bold text-emerald-700">฿{fmtNum(c.gmv)}</td></tr>
-              );
-            })}
-          </tbody>
-        </table>
+
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h3 className="font-display text-lg text-[#012b25]">📋 ประวัติ Logs & แผงตัวกรอง</h3>
+          <div className="flex gap-1 bg-[#f3f6f5] p-1 rounded-xl">
+            {['7', '30', '90', 'all'].map(p => (
+              <button key={p} onClick={() => setPeriod(p)} className={`text-[11px] font-bold px-4 py-2 rounded-lg transition-all ${period === p ? 'bg-[#012b25] text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{p === 'all' ? 'ทั้งหมด' : `${p} วัน`}</button>
+            ))}
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+          <div className="col-span-2 lg:col-span-5 relative"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="ค้นหาจากประโยค Hook..." className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-emerald-700 transition-all shadow-sm" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
+          <div><label className="text-[10px] uppercase font-bold text-slate-500 block mb-1.5 ml-1">สินค้า</label><select value={filterProduct} onChange={e=>setFilterProduct(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none"><option value="">-- ทั้งหมด --</option><option value="V">📚 V — Value Content</option>{products.map(p => <option key={p.id} value={p.id}>{truncate(p.name, 20)}</option>)}</select></div>
+          <div><label className="text-[10px] uppercase font-bold text-slate-500 block mb-1.5 ml-1">หมวด ABCD</label><select value={filterABCD} onChange={e=>setFilterABCD(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none"><option value="">-- ทั้งหมด --</option>{Object.entries(ABCD_INFO).map(([k, info]) => <option key={k} value={k}>{info.short} - {info.desc}</option>)}</select></div>
+          <div><label className="text-[10px] uppercase font-bold text-slate-500 block mb-1.5 ml-1">Pillar หลัก</label><select value={filterPillar} onChange={e=>setFilterPillar(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none"><option value="">-- ทั้งหมด --</option>{DEFAULT_PILLARS.map(p => <option key={p.id} value={p.id}>{p.id} - {p.name}</option>)}</select></div>
+          <div><label className="text-[10px] uppercase font-bold text-slate-500 block mb-1.5 ml-1">ประเภท</label><select value={filterType} onChange={e=>setFilterType(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none"><option value="">-- ทั้งหมด --</option>{PRODUCT_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select></div>
+          <div><label className="text-[10px] uppercase font-bold text-slate-500 block mb-1.5 ml-1">การเรียงลำดับ</label><select value={sortOrder} onChange={e=>setSortOrder(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none font-bold text-[#012b25]"><option value="date_desc">📅 ล่าสุดขึ้นก่อน</option><option value="date_asc">📅 เก่าสุดขึ้นก่อน</option><option value="gmv_desc">🔥 GMV สูงสุด</option><option value="views7d_desc">👀 ยอดวิว 7d สูงสุด</option></select></div>
+        </div>
+
+        <div className="overflow-x-auto pt-2">
+          <table className="w-full text-left text-xs border-collapse text-slate-600">
+            <thead>
+              <tr className="bg-slate-50/80 font-bold border-y border-slate-100 text-slate-400 uppercase text-[10px] tracking-wider">
+                <th className="p-3 w-24">วันที่ลง</th>
+                <th className="p-3 w-40">สินค้าหลัก</th>
+                <th className="p-3">สคริปต์ Hook</th>
+                <th className="p-3 w-24 text-center">สถานะเงิน</th>
+                <th className="p-3 w-20 text-right">Views 7d</th>
+                <th className="p-3 w-24 text-right">GMV สรุป</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filtered.length === 0 ? (
+                <tr><td colSpan="6" className="p-8 text-center text-slate-400 italic">ไม่พบประวัติคลิปที่ตรงกับตัวกรอง</td></tr>
+              ) : (
+                filtered.map(c => {
+                  const prod = products.find(p=>p.id === c.productId);
+                  const isWinner = (Number(c.gmv) || 0) >= WINNER_GMV;
+                  const catInfo = getAbcdInfo(c.isV ? 'V' : prod?.category);
+                  const commStatus = c.commStatus || 'pending';
+                  const statusColors = { paid: 'bg-emerald-100 text-emerald-700', pending: 'bg-amber-100 text-amber-700', failed: 'bg-rose-100 text-rose-700' }[commStatus];
+                  const statusLabels = { paid: 'จ่ายแล้ว', pending: 'รอโอน', failed: 'ยกเลิก' }[commStatus];
+                  return (
+                    <tr key={c.id} onClick={() => onEditClip(c.id)} className="hover:bg-slate-50/80 cursor-pointer transition-colors text-slate-700 group">
+                      <td className="p-3 whitespace-nowrap font-mono">{fmtDate(c.postedAt)}</td>
+                      <td className="p-3"><div className="flex items-center gap-2"><div className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0 ${catInfo.bg}`}>{catInfo.short}</div><span className="font-semibold text-slate-900 truncate max-w-[140px] block">{c.isV ? '📚 สาระความรู้ (V)' : (prod?.name || '-')}</span></div></td>
+                      <td className="p-3 text-slate-500 font-medium group-hover:text-emerald-800 transition-colors"><div className="line-clamp-2 leading-relaxed" title={c.hook}>{c.hook || '-'}</div></td>
+                      <td className="p-3 text-center"><span className={`px-2 py-1 rounded-md text-[10px] font-bold ${statusColors}`}>{statusLabels}</span></td>
+                      <td className="p-3 text-right font-mono font-medium">{fmtNum(c.views7d)}</td>
+                      <td className={`p-3 text-right font-mono font-bold ${isWinner ? 'text-[#f26522] text-sm' : 'text-emerald-700'}`}>฿{fmtNum(c.gmv)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -1332,7 +1419,13 @@ function LockProductModal({ product, onClose, onSave }) {
     <Modal title={`🔒 Lock เป้าหมาย: ${truncate(product.name, 25)}`} onClose={onClose} footer={footer}>
       <p className="text-xs font-medium text-slate-500 leading-relaxed mb-5 bg-slate-50 p-4 rounded-2xl border border-slate-100 shadow-sm">ตรึงสินค้านี้ไว้ใน Focus Board ประจำเดือน เพื่อคุมสัดส่วนความถี่และทิศทางการทำคลิปให้เข้าเป้าหมาย</p>
       <FormField label="เป้าหมายจำนวนคลิปที่ต้องทำ (รายเดือน) *"><input type="number" value={target} onChange={e => setTarget(Number(e.target.value))} min={1} className={`${inputStyles} bg-white border-slate-200 font-mono text-xl text-center`} /></FormField>
-      {product.angles?.length > 0 && (<FormField label="Angles ล็อคเป้าที่จะ Test ในเดือนนี้" hint="(เลือกคลิกได้หลายมุมพร้อมกัน)"><div className="space-y-2 mt-2">{product.angles.map(a => { const on = anglesToTest.includes(a.id); return (<button key={a.id} onClick={() => setAnglesToTest(on ? anglesToTest.filter(x => x !== a.id) : [...anglesToTest, a.id])} className={`w-full text-left text-xs font-bold p-4 rounded-2xl border transition-all flex items-start gap-3 shadow-sm ${on ? 'bg-[#012b25] text-white border-[#012b25]' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}><div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 mt-0.5 ${on ? 'bg-[#bcd924] border-[#bcd924] text-[#012b25]' : 'border-slate-300'}`}>{on && <CheckCircle2 className="w-3 h-3" />}</div><span className="leading-relaxed">{a.text}</span></button>); })}</div></FormField>)}
+      {product.angles?.length > 0 && (
+        <FormField label="Angles ล็อคเป้าที่จะ Test ในเดือนนี้" hint="(เลือกคลิกได้หลายมุมพร้อมกัน)">
+          <div className="space-y-2 mt-2">
+            {product.angles.map(a => { const on = anglesToTest.includes(a.id); return (<button key={a.id} onClick={() => setAnglesToTest(on ? anglesToTest.filter(x => x !== a.id) : [...anglesToTest, a.id])} className={`w-full text-left text-xs font-bold p-4 rounded-2xl border transition-all flex items-start gap-3 shadow-sm ${on ? 'bg-[#012b25] text-white border-[#012b25]' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}><div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 mt-0.5 ${on ? 'bg-[#bcd924] border-[#bcd924] text-[#012b25]' : 'border-slate-300'}`}>{on && <CheckCircle2 className="w-3 h-3" />}</div><span className="leading-relaxed">{a.text}</span></button>); })}
+          </div>
+        </FormField>
+      )}
     </Modal>
   );
 }
@@ -1342,11 +1435,12 @@ function AddClipModal({ products, defaultProductId, onClose, onSave, showToast }
   const [pillarId, setPillarId] = useState(''); const [painId, setPainId] = useState(''); const [angleId, setAngleId] = useState('');
   const [hook, setHook] = useState(''); const [level, setLevel] = useState('consideration');
   const [postedAt, setPostedAt] = useState(todayStr()); const [videoLink, setVideoLink] = useState(''); const [gencodeSubmitted, setGencodeSubmitted] = useState(false);
+  const [commStatus, setCommStatus] = useState('pending');
   const selectedProduct = products.find(p => p.id === productId);
 
   const handleSave = () => { 
     if (!isV && !productId) return showToast('กรุณาเลือกสินค้าที่เชื่อมโยง', 'error'); 
-    onSave({ isV, productId: isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted }); 
+    onSave({ isV, productId: isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted, commStatus }); 
     onClose();
   };
   return (<Modal title="🎬 เพิ่มประวัติการลงคลิป" onClose={onClose} size="lg" footer={<button onClick={handleSave} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2"><Plus className="w-4 h-4"/> บันทึกข้อมูลคลิปลงระบบ</button>}>
@@ -1355,8 +1449,11 @@ function AddClipModal({ products, defaultProductId, onClose, onSave, showToast }
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><FormField label="Pillar (เสาหลัก)"><select value={pillarId} onChange={e => setPillarId(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200`}><option value="">- เลือก -</option>{DEFAULT_PILLARS.map(p => <option key={p.id} value={p.id}>{p.emoji} {p.id} — {p.name}</option>)}</select></FormField><FormField label="วันที่เริ่มโพสต์"><input type="date" value={postedAt} onChange={e => setPostedAt(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200 font-mono`} /></FormField></div>
     {selectedProduct && !isV && (<div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-100 pt-4 mt-1"><FormField label="เลือก Pain Point ที่ใช้"><select value={painId} onChange={e => setPainId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">- ไม่ระบุ -</option>{selectedProduct.pains?.map(p => <option key={p.id} value={p.id}>{truncate(p.text, 50)}</option>)}</select></FormField><FormField label="เลือก Angle ที่เล่า"><select value={angleId} onChange={e => setAngleId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">- ไม่ระบุ -</option>{selectedProduct.angles?.map(a => <option key={a.id} value={a.id}>{truncate(a.text, 50)}</option>)}</select></FormField></div>)}
     <FormField label="คำเปิดคลิป (Hook)"><textarea value={hook} onChange={e => setHook(e.target.value)} className={`${inputStyles} resize-none bg-white shadow-sm border-slate-200`} rows={2}></textarea></FormField>
-    <FormField label="ระดับเป้าหมายของคลิปนี้"><div className="grid grid-cols-3 gap-2">{CLIP_LEVELS.map(l => (<button key={l.id} onClick={() => setLevel(l.id)} className={`text-[10px] font-bold uppercase tracking-wider py-3 rounded-xl transition-all shadow-sm ${level === l.id ? l.color + ' text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{l.label}</button>))}</div></FormField>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2"><FormField label="Video URL Link"><input value={videoLink} onChange={e => setVideoLink(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200`} placeholder="https://tiktok.com/..." /></FormField><FormField label="Gencode Status"><label className="flex items-center gap-3 cursor-pointer p-3.5 bg-emerald-50 border border-emerald-100 rounded-2xl hover:bg-emerald-100/50 transition-all"><input type="checkbox" checked={gencodeSubmitted} onChange={e => setGencodeSubmitted(e.target.checked)} className="w-5 h-5 accent-emerald-600 rounded" /><span className="text-sm font-bold text-emerald-900">✅ อัปโค้ดเข้าคลังแล้ว</span></label></FormField></div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+      <FormField label="ระดับเป้าหมายของคลิปนี้"><div className="grid grid-cols-3 gap-2">{CLIP_LEVELS.map(l => (<button key={l.id} onClick={() => setLevel(l.id)} className={`text-[10px] font-bold uppercase tracking-wider py-3 rounded-xl transition-all shadow-sm ${level === l.id ? l.color + ' text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{l.label}</button>))}</div></FormField>
+      <FormField label="สถานะเงิน (Financial Tracker)"><select value={commStatus} onChange={e => setCommStatus(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200 font-bold ${commStatus === 'paid' ? 'text-emerald-700' : commStatus === 'failed' ? 'text-rose-700' : 'text-amber-600'}`}><option value="pending">⏳ รอโอน (Pending)</option><option value="paid">✅ เงินเข้าแล้ว (Paid)</option><option value="failed">❌ ยกเลิก/คืนเงิน (Failed)</option></select></FormField>
+    </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2"><FormField label="Video URL Link"><input value={videoLink} onChange={e => setVideoLink(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200`} placeholder="https://tiktok.com/..." /></FormField><FormField label="Gencode Status"><label className="flex items-center gap-3 cursor-pointer p-3.5 bg-emerald-50 border border-emerald-100 rounded-2xl hover:bg-emerald-100/50 transition-all mt-6"><input type="checkbox" checked={gencodeSubmitted} onChange={e => setGencodeSubmitted(e.target.checked)} className="w-5 h-5 accent-emerald-600 rounded" /><span className="text-sm font-bold text-emerald-900">✅ อัปโค้ดเข้าคลังแล้ว</span></label></FormField></div>
   </Modal>);
 }
 
@@ -1368,12 +1465,13 @@ function EditClipModal({ clip, products, onClose, onSave, onDelete }) {
   const [videoLink, setVideoLink] = useState(clip?.videoLink || ''); const [gencodeSubmitted, setGencodeSubmitted] = useState(!!clip?.gencodeSubmitted);
   const [views24h, setViews24h] = useState(clip?.views24h || ''); const [views7d, setViews7d] = useState(clip?.views7d || '');
   const [orders, setOrders] = useState(clip?.orders || ''); const [gmv, setGmv] = useState(clip?.gmv || ''); const [ctr, setCtr] = useState(clip?.ctr || ''); const [note, setNote] = useState(clip?.note || '');
+  const [commStatus, setCommStatus] = useState(clip?.commStatus || 'pending');
   
   if (!clip) return null; const selectedProduct = products.find(p => p.id === productId);
-  const handleSave = () => { onSave({ productId: clip.isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted, views24h: views24h === '' ? null : Number(views24h), views7d: views7d === '' ? null : Number(views7d), orders: orders === '' ? null : Number(orders), gmv: gmv === '' ? null : Number(gmv), ctr: ctr === '' ? null : Number(ctr), note }); onClose(); };
+  const handleSave = () => { onSave({ productId: clip.isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted, views24h: views24h === '' ? null : Number(views24h), views7d: views7d === '' ? null : Number(views7d), orders: orders === '' ? null : Number(orders), gmv: gmv === '' ? null : Number(gmv), ctr: ctr === '' ? null : Number(ctr), note, commStatus }); onClose(); };
   
   return (<Modal title="✏️ แก้ไขข้อมูล & อัปเดตสถิติคลิป" onClose={onClose} size="xl" footer={<div className="flex gap-3"><button onClick={() => { onDelete(); onClose(); }} className="px-5 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-100 rounded-2xl py-4 transition-colors">🗑️ ลบถาวร</button><button onClick={handleSave} className="flex-1 bg-[#012b25] text-white hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2"><Edit3 className="w-4 h-4"/> อัปเดตสถิติคลิป</button></div>}>
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-4"><h3 className="font-display text-sm text-[#012b25] border-b border-slate-100 pb-2 flex items-center gap-2"><FileText className="w-4 h-4"/> ข้อมูลตั้งต้น</h3>{!clip.isV && (<FormField label="ผูกสินค้า"><select value={productId} onChange={e => setProductId(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200`}><option value="">-- เลือก --</option>{products.map(p => <option key={p.id} value={p.id}>{ABCD_INFO[p.category]?.short || '?'} — {p.name}</option>)}</select></FormField>)}<div className="grid grid-cols-2 gap-3"><FormField label="Pillar"><select value={pillarId} onChange={e => setPillarId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{DEFAULT_PILLARS.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}</select></FormField><FormField label="วันที่ลง"><input type="date" value={postedAt} onChange={e => setPostedAt(e.target.value)} className={`${inputStyles} bg-white border-slate-200 font-mono`} /></FormField></div>{selectedProduct && !clip.isV && (<div className="grid grid-cols-2 gap-3"><FormField label="Pain"><select value={painId} onChange={e => setPainId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{selectedProduct.pains?.map(p => <option key={p.id} value={p.id}>{p.text.slice(0, 30)}</option>)}</select></FormField><FormField label="Angle"><select value={angleId} onChange={e => setAngleId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{selectedProduct.angles?.map(a => <option key={a.id} value={a.id}>{a.text.slice(0, 30)}</option>)}</select></FormField></div>)}<FormField label="Hook"><input value={hook} onChange={e => setHook(e.target.value)} className={`${inputStyles} bg-white border-slate-200 font-medium`} /></FormField><FormField label="ระดับเป้าหมายคลิป"><div className="grid grid-cols-3 gap-2">{CLIP_LEVELS.map(l => (<button key={l.id} onClick={() => setLevel(l.id)} className={`text-[10px] font-bold uppercase tracking-wider py-2.5 rounded-xl transition-all ${level === l.id ? l.color + ' text-white shadow-md' : 'bg-white border border-slate-200 text-slate-500'}`}>{l.label}</button>))}</div></FormField><div className="grid grid-cols-3 gap-3 items-end"><div className="col-span-2"><FormField label="Video Link"><input value={videoLink} onChange={e => setVideoLink(e.target.value)} className={`${inputStyles} bg-white border-slate-200`} /></FormField></div><div className="mb-4"><label className={`flex items-center justify-center gap-2 cursor-pointer py-3.5 px-2 rounded-xl transition-all border ${gencodeSubmitted ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}><input type="checkbox" checked={gencodeSubmitted} onChange={e => setGencodeSubmitted(e.target.checked)} className="w-4 h-4 accent-emerald-600 rounded" /><span className={`text-[11px] font-bold ${gencodeSubmitted ? 'text-emerald-800' : 'text-slate-500'}`}>GC ✓</span></label></div></div></div><div className="space-y-4"><h3 className="font-display text-sm text-[#012b25] border-b border-slate-100 pb-2 flex items-center gap-2"><BarChart3 className="w-4 h-4"/> สถิติผลลัพธ์ (Performance)</h3><div className="bg-gradient-to-br from-blue-50/50 to-white p-5 rounded-3xl border border-blue-100 space-y-4 shadow-sm"><div className="grid grid-cols-2 gap-4"><FormField label="Views 24 ชม."><input type="number" value={views24h} onChange={e => setViews24h(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono`} /></FormField><FormField label="Views 7 วัน"><input type="number" value={views7d} onChange={e => setViews7d(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono font-bold`} /></FormField></div><div className="grid grid-cols-2 gap-4 border-t border-blue-50 pt-4"><FormField label="จำนวนออเดอร์"><input type="number" value={orders} onChange={e => setOrders(e.target.value)} className={`${inputStyles} bg-white border-emerald-50 font-mono text-emerald-700`} /></FormField><FormField label="GMV ฿ (ยอดขาย)"><input type="number" value={gmv} onChange={e => setGmv(e.target.value)} className={`${inputStyles} bg-white border-emerald-100 font-mono font-bold text-xl text-emerald-700`} /></FormField></div><FormField label="CTR % (อัตราคลิก)"><input type="number" step="0.1" value={ctr} onChange={e => setCtr(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono`} /></FormField></div><FormField label="Note บันทึกความจำ"><textarea value={note} onChange={e => setNote(e.target.value)} rows={3} className={`${inputStyles} resize-none bg-white border-slate-200`} placeholder="เช่น 'คลิปนี้ปังมากเพราะใช้เสียง AI แนวสืบสวน...'" /></FormField></div></div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-4"><h3 className="font-display text-sm text-[#012b25] border-b border-slate-100 pb-2 flex items-center gap-2"><FileText className="w-4 h-4"/> ข้อมูลตั้งต้น</h3>{!clip.isV && (<FormField label="ผูกสินค้า"><select value={productId} onChange={e => setProductId(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200`}><option value="">-- เลือก --</option>{products.map(p => <option key={p.id} value={p.id}>{ABCD_INFO[p.category]?.short || '?'} — {p.name}</option>)}</select></FormField>)}<div className="grid grid-cols-2 gap-3"><FormField label="Pillar"><select value={pillarId} onChange={e => setPillarId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{DEFAULT_PILLARS.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}</select></FormField><FormField label="วันที่ลง"><input type="date" value={postedAt} onChange={e => setPostedAt(e.target.value)} className={`${inputStyles} bg-white border-slate-200 font-mono`} /></FormField></div>{selectedProduct && !clip.isV && (<div className="grid grid-cols-2 gap-3"><FormField label="Pain"><select value={painId} onChange={e => setPainId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{selectedProduct.pains?.map(p => <option key={p.id} value={p.id}>{p.text.slice(0, 30)}</option>)}</select></FormField><FormField label="Angle"><select value={angleId} onChange={e => setAngleId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{selectedProduct.angles?.map(a => <option key={a.id} value={a.id}>{a.text.slice(0, 30)}</option>)}</select></FormField></div>)}<FormField label="Hook"><input value={hook} onChange={e => setHook(e.target.value)} className={`${inputStyles} bg-white border-slate-200 font-medium`} /></FormField><FormField label="ระดับเป้าหมายคลิป"><div className="grid grid-cols-3 gap-2">{CLIP_LEVELS.map(l => (<button key={l.id} onClick={() => setLevel(l.id)} className={`text-[10px] font-bold uppercase tracking-wider py-2.5 rounded-xl transition-all ${level === l.id ? l.color + ' text-white shadow-md' : 'bg-white border border-slate-200 text-slate-500'}`}>{l.label}</button>))}</div></FormField><div className="grid grid-cols-3 gap-3 items-end"><div className="col-span-2"><FormField label="Video Link"><input value={videoLink} onChange={e => setVideoLink(e.target.value)} className={`${inputStyles} bg-white border-slate-200`} /></FormField></div><div className="mb-4"><label className={`flex items-center justify-center gap-2 cursor-pointer py-3.5 px-2 rounded-xl transition-all border ${gencodeSubmitted ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}><input type="checkbox" checked={gencodeSubmitted} onChange={e => setGencodeSubmitted(e.target.checked)} className="w-4 h-4 accent-emerald-600 rounded" /><span className={`text-[11px] font-bold ${gencodeSubmitted ? 'text-emerald-800' : 'text-slate-500'}`}>GC ✓</span></label></div></div></div><div className="space-y-4"><h3 className="font-display text-sm text-[#012b25] border-b border-slate-100 pb-2 flex items-center gap-2"><BarChart3 className="w-4 h-4"/> สถิติผลลัพธ์ (Performance)</h3><div className="bg-gradient-to-br from-blue-50/50 to-white p-5 rounded-3xl border border-blue-100 space-y-4 shadow-sm"><div className="grid grid-cols-2 gap-4"><FormField label="Views 24 ชม."><input type="number" value={views24h} onChange={e => setViews24h(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono`} /></FormField><FormField label="Views 7 วัน"><input type="number" value={views7d} onChange={e => setViews7d(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono font-bold`} /></FormField></div><div className="grid grid-cols-2 gap-4 border-t border-blue-50 pt-4"><FormField label="จำนวนออเดอร์"><input type="number" value={orders} onChange={e => setOrders(e.target.value)} className={`${inputStyles} bg-white border-emerald-50 font-mono text-emerald-700`} /></FormField><FormField label="GMV ฿ (ยอดขาย)"><input type="number" value={gmv} onChange={e => setGmv(e.target.value)} className={`${inputStyles} bg-white border-emerald-100 font-mono font-bold text-xl text-emerald-700`} /></FormField></div><div className="grid grid-cols-2 gap-4"><FormField label="CTR % (อัตราคลิก)"><input type="number" step="0.1" value={ctr} onChange={e => setCtr(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono`} /></FormField><FormField label="สถานะเงิน (Financial)"><select value={commStatus} onChange={e => setCommStatus(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200 font-bold ${commStatus === 'paid' ? 'text-emerald-700' : commStatus === 'failed' ? 'text-rose-700' : 'text-amber-600'}`}><option value="pending">⏳ รอโอน (Pending)</option><option value="paid">✅ เงินเข้าแล้ว (Paid)</option><option value="failed">❌ ยกเลิก/คืนเงิน</option></select></FormField></div></div><FormField label="Note บันทึกความจำ"><textarea value={note} onChange={e => setNote(e.target.value)} rows={3} className={`${inputStyles} resize-none bg-white border-slate-200`} placeholder="เช่น 'คลิปนี้ปังมากเพราะใช้เสียง AI แนวสืบสวน...'" /></FormField></div></div>
   </Modal>);
 }
 
@@ -1399,6 +1497,7 @@ function BackupModal({ products, clips, onClose, showToast }) {
   return (<Modal title="💾 ระบบสำรองข้อมูล (Backup)" onClose={onClose} size="lg" footer={<div className="grid grid-cols-2 gap-3"><button onClick={tryDownload} className={`font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 ${downloaded ? 'bg-emerald-500 text-white' : 'bg-white border border-slate-200 text-[#012b25] hover:bg-slate-50'}`}>{downloaded ? <><CheckCircle2 className="w-5 h-5" /> เสร็จสิ้น</> : <><Download className="w-5 h-5" /> Download (.json)</>}</button><button onClick={copyAll} className={`font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 ${copied ? 'bg-emerald-500 text-white' : 'bg-[#012b25] text-[#bcd924] hover:bg-[#033c32]'}`}>{copied ? <><CheckCircle2 className="w-5 h-5" /> คัดลอกแล้ว</> : <><Copy className="w-5 h-5" /> Copy Code</>}</button></div>}><div className="bg-slate-50 border border-slate-100 rounded-3xl p-5 mb-5 grid grid-cols-3 gap-4 text-center divide-x divide-slate-200"><div><div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">📦 สินค้าในพอร์ต</div><div className="font-display text-2xl text-[#012b25]">{products.length}</div></div><div><div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">🎬 คลิปประวัติ</div><div className="font-display text-2xl text-[#012b25]">{clips.length}</div></div><div><div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">💾 ขนาดไฟล์</div><div className="font-display text-2xl text-[#012b25]">{sizeKB} <span className="text-sm text-stone-400 font-sans">KB</span></div></div></div><div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-4 text-xs shadow-sm"><div className="font-bold text-emerald-900 mb-1.5 flex items-center gap-1.5"><Cloud className="w-4 h-4"/> ข้อมูลของคุณปลอดภัยบน Cloud แล้ว!</div><div className="text-emerald-800/80 font-medium leading-relaxed space-y-1.5"><p>ปัจจุบันระบบใช้สถาปัตยกรรม <strong className="text-emerald-900">Subcollections</strong> ทำให้มีการเซฟอัตโนมัติ (Auto-Sync) แบบ Real-time</p><p>คุณสามารถกด Download เก็บไฟล์ <code className="bg-white px-2 py-0.5 rounded-md border border-emerald-200 shadow-sm font-mono font-bold">{filename}</code> นี้ไว้ทุกสิ้นเดือน เพื่อเป็น Snapshot ประวัติสำรองของช่องตัวเองได้ครับ</p></div></div><details className="group"><summary className="text-xs font-bold text-[#012b25] cursor-pointer hover:text-emerald-700 transition-colors">▸ กดเพื่อดูตัวอย่างข้อมูลดิบ (JSON Preview)</summary><textarea readOnly value={json} className="w-full h-48 px-3 py-3 text-[10px] font-mono bg-slate-900 text-emerald-300 rounded-2xl mt-3 resize-none shadow-inner focus:outline-none" onClick={e => e.target.select()} /></details></Modal>);
 }
 
-function SettingsModal({ onClose, onExport, onClearAll }) {
-  return (<Modal title="⚙️ แผงควบคุมระบบ (Settings)" onClose={onClose}><div className="space-y-4"><button onClick={onExport} className="w-full p-4 bg-white border border-slate-100 hover:border-[#012b25]/30 hover:shadow-md rounded-2xl text-left transition-all group flex items-center gap-4"><div className="p-3 bg-slate-50 group-hover:bg-[#bcd924] rounded-xl transition-colors"><Download className="w-5 h-5 text-stone-400 group-hover:text-[#012b25]" /></div><div><div className="font-bold text-[#012b25] text-sm mb-0.5">ระบบสำรองข้อมูล (Export JSON)</div><div className="text-[10px] text-stone-500 font-medium">โหลดไฟล์ Snapshot ดิบไว้เก็บสำรองในคอมพิวเตอร์</div></div></button><div className="border-t border-slate-100 pt-4"><button onClick={onClearAll} className="w-full p-4 bg-rose-50 hover:bg-rose-100 border border-rose-100 text-rose-700 rounded-2xl text-left transition-all"><div className="font-bold text-sm flex items-center gap-2"><Trash2 className="w-4 h-4"/> ล้างทำลายฐานข้อมูลทั้งหมด (Factory Reset)</div><div className="text-xs mt-1 text-rose-600/80">⚠️ ลบข้อมูลทิ้งทั้งบนเครื่องและบน Cloud แบบกู้คืนไม่ได้</div></button></div><div className="bg-slate-50 rounded-2xl p-4 mt-4 text-[11px] text-slate-500 space-y-2 leading-relaxed border border-slate-100"><div className="font-bold text-slate-700 uppercase tracking-wider mb-2">System Parameters</div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Version:</strong> PEEM6PACK Command Center v2.5 (Cloud Firestore Subcollections)</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Argoon Gate:</strong> เต็ม {ARGOON_MAX} คะแนน | ผ่านเกณฑ์ (PASS) ที่ ≥{ARGOON_PASS} | เฝ้าระวัง (WAIT) ที่ {ARGOON_WATCH}-{ARGOON_PASS - 1} | ตัดทิ้ง (CUT) หากต่ำกว่า {ARGOON_WATCH}</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Decision AI:</strong> ประทับตรา PICK เมื่อ ≥{PICK_THRESHOLD}% | ตรา WAIT เมื่อ ≥{WAIT_THRESHOLD}% | ตรา DROP ตัดทิ้งเมื่อต่ำกว่า {WAIT_THRESHOLD}%</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>SaaS Portfolio:</strong> A (Hero) {PORTFOLIO_TARGET.A}% / B (Test) {PORTFOLIO_TARGET.B}% / C (Volume) {PORTFOLIO_TARGET.C}% / D (Premium) {PORTFOLIO_TARGET.D}%</p></div></div></div></Modal>);
+function SettingsModal({ appSettings, onUpdateSettings, onClose, onExport, onClearAll }) {
+  const [notice, setNotice] = useState(appSettings.noticeBoard || '');
+  return (<Modal title="⚙️ แผงควบคุมระบบ (Settings)" onClose={onClose}><div className="space-y-4"><div className="bg-slate-50 border border-slate-100 p-5 rounded-3xl mb-4"><FormField label="กระดานกลยุทธ์ประจำสัปดาห์ (Notice Board)"><textarea value={notice} onChange={e=>setNotice(e.target.value)} rows={3} className={`${inputStyles} bg-white border-slate-200 resize-none`} placeholder="ประกาศเป้าหมายให้ตัวเอง หรือปักหมุดข่าวสารของช่อง..." /></FormField><button onClick={() => { onUpdateSettings({ noticeBoard: notice }); onClose(); }} className="w-full bg-[#012b25] hover:bg-[#033c32] text-[#d9eb54] transition-all font-bold py-3.5 rounded-xl shadow-md flex justify-center items-center gap-2"><Lightbulb className="w-4 h-4" /> ปักหมุดกลยุทธ์ลงบอร์ด</button></div><button onClick={onExport} className="w-full p-4 bg-white border border-slate-100 hover:border-[#012b25]/30 hover:shadow-md rounded-2xl text-left transition-all group flex items-center gap-4"><div className="p-3 bg-slate-50 group-hover:bg-[#bcd924] rounded-xl transition-colors"><Download className="w-5 h-5 text-stone-400 group-hover:text-[#012b25]" /></div><div><div className="font-bold text-[#012b25] text-sm mb-0.5">ระบบสำรองข้อมูล (Export JSON)</div><div className="text-[10px] text-stone-500 font-medium">โหลดไฟล์ Snapshot ดิบไว้เก็บสำรองในคอมพิวเตอร์</div></div></button><div className="border-t border-slate-100 pt-4"><button onClick={onClearAll} className="w-full p-4 bg-rose-50 hover:bg-rose-100 border border-rose-100 text-rose-700 rounded-2xl text-left transition-all"><div className="font-bold text-sm flex items-center gap-2"><Trash2 className="w-4 h-4"/> ล้างทำลายฐานข้อมูลทั้งหมด (Factory Reset)</div><div className="text-xs mt-1 text-rose-600/80">⚠️ ลบข้อมูลทิ้งทั้งบนเครื่องและบน Cloud แบบกู้คืนไม่ได้</div></button></div><div className="bg-slate-50 rounded-2xl p-4 mt-4 text-[11px] text-slate-500 space-y-2 leading-relaxed border border-slate-100"><div className="font-bold text-slate-700 uppercase tracking-wider mb-2">System Parameters</div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Version:</strong> PEEM6PACK Command Center v2.6 (Cloud Firestore Subcollections)</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Argoon Gate:</strong> เต็ม {ARGOON_MAX} คะแนน | ผ่านเกณฑ์ (PASS) ที่ ≥{ARGOON_PASS} | เฝ้าระวัง (WAIT) ที่ {ARGOON_WATCH}-{ARGOON_PASS - 1} | ตัดทิ้ง (CUT) หากต่ำกว่า {ARGOON_WATCH}</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>Decision AI:</strong> ประทับตรา PICK เมื่อ ≥{PICK_THRESHOLD}% | ตรา WAIT เมื่อ ≥{WAIT_THRESHOLD}% | ตรา DROP ตัดทิ้งเมื่อต่ำกว่า {WAIT_THRESHOLD}%</p></div><div className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-[#bcd924] mt-1.5 flex-shrink-0"></div><p><strong>SaaS Portfolio:</strong> A (Hero) {PORTFOLIO_TARGET.A}% / B (Test) {PORTFOLIO_TARGET.B}% / C (Volume) {PORTFOLIO_TARGET.C}% / D (Premium) {PORTFOLIO_TARGET.D}%</p></div></div></div></Modal>);
 }
