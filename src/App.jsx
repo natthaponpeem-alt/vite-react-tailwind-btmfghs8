@@ -417,7 +417,7 @@ export default function App() {
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
-          {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}/>)}
+          {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
           {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} />)}
         </div>
       </main>
@@ -1157,6 +1157,56 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
   const cutCandidates = useMemo(() => getProductsToCut(products, clips), [products, clips]);
   const roi = useMemo(() => getROIAnalysis(products, clips, revenueTarget), [products, clips, revenueTarget]);
 
+  // 🧠 1. สมองกล AI Recommendations ที่คุณเตรียมไว้ (ใส่ให้แล้ว!)
+  const recommendations = useMemo(() => {
+    return products.map(p => {
+      const sales = getProductSales(p, clips, days);
+      const tiktok = sales.fromManual;
+      const clipCount = sales.clipCount;
+      const clipGMV = sales.fromClips;
+      
+      const commissionPct = Number(p.scorecard?.commission) || 0;
+      const commRev = (tiktok * commissionPct) / 100;
+      const clipCommRev = (clipGMV * commissionPct) / 100;
+
+      if (sales.hasManual) {
+        // ⭐ กฎ 0 (ใหม่): กินบุญเก่า (Passive Income) - ไม่ได้ลงคลิปเลยใน 30 วัน แต่ได้ค่าคอม >= 500 บาท
+        if (clipCount === 0 && commRev >= 500) return { product: p, rec: '💎 ขุดสมบัติ (Passive)', reason: `กินคอมฟรี ฿${fmtNum(Math.round(commRev))} จากคลิปเก่า/หน้าร้าน — รีบทำคลิปมุมใหม่เติมเชื้อไฟด่วน!`, color: 'bg-purple-600', icon: Sparkles, sortKey: 7 };
+
+        // กฎ 1: Cash Cow (ฟันค่าคอมทะลุ 1,000 แต่ลงคลิปน้อยกว่า 3 คลิป)
+        if (commRev >= 1000 && clipCount < 3) return { product: p, rec: 'ดันด่วน', reason: `ฟันค่าคอม ฿${fmtNum(Math.round(commRev))} แต่ลงแค่ ${clipCount} คลิป — สับสคริปต์เพิ่มด่วน`, color: 'bg-rose-600', icon: Flame, sortKey: 6 };
+        
+        // กฎ 2: Hero Product (ค่าคอมสูง และลงคลิปต่อเนื่องแล้ว -> เลี้ยงกระแส)
+        if (commRev >= 1000) return { product: p, rec: 'ดันต่อ', reason: `ตัวทำเงินหลัก (คอม ฿${fmtNum(Math.round(commRev))}) — เลี้ยงความถี่ไว้`, color: 'bg-emerald-500', icon: TrendingUp, sortKey: 5 };
+        
+        // กฎ 3: Volume/Traction (ยอดคอมเริ่มมา แต่คลิปน้อย)
+        if (commRev >= 300 && clipCount < 3) return { product: p, rec: 'ลงเพิ่ม', reason: `ได้ค่าคอม ฿${fmtNum(Math.round(commRev))} กำลังมา — ขยี้คลิปเพิ่ม`, color: 'bg-amber-500', icon: Lightbulb, sortKey: 4 };
+        
+        // กฎ 4: Steady (ยอดเดินปกติ)
+        if (commRev >= 300 || tiktok >= 5000) return { product: p, rec: 'ทำต่อ', reason: `ยอด GMV ฿${fmtNum(tiktok)} (คอม ฿${fmtNum(Math.round(commRev))})`, color: 'bg-sky-500', icon: Activity, sortKey: 3 };
+        
+        // กฎ 5: Testing (ยอดรวมพอเดินบ้าง แต่คอมยังน้อย)
+        if (tiktok >= 1000) return { product: p, rec: 'ลองมุมใหม่', reason: `มียอด ฿${fmtNum(tiktok)} แต่คอมยังน้อย — หา Pain Point ใหม่`, color: 'bg-[#d97706]', icon: Wand2, sortKey: 2 };
+        
+        // กฎ 6: Dead end (ลงเกิน 3 คลิปแล้วยอดไม่เดิน -> สั่งเบรก)
+        if (clipCount >= 4 && tiktok < 1000) return { product: p, rec: 'พักดูอาการ', reason: `ลงไป ${clipCount} คลิปยอดไม่เดิน — เซฟเวลาไปทำตัวอื่น`, color: 'bg-slate-500', icon: TrendingDown, sortKey: 1 };
+        
+        return null;
+      }
+
+      // --- กรณีที่ยังไม่มียอดขายแมนนวล (อิงจากประวัติคลิปที่เคยกรอกในระบบล้วนๆ) ---
+      if (clipCount === 0) return null;
+      
+      const revPerClip = clipCount > 0 ? clipCommRev / clipCount : 0;
+      
+      if (revPerClip >= 300 && clipCount >= 2) return { product: p, rec: 'ดันต่อ', reason: `ได้ค่าคอมเฉลี่ย ฿${fmtNum(Math.round(revPerClip))}/คลิป — เอนจินทำงานดี`, color: 'bg-emerald-500', icon: TrendingUp, sortKey: 3 };
+      if (revPerClip >= 100) return { product: p, rec: 'ทำต่อ', reason: `ได้ค่าคอมเฉลี่ย ฿${fmtNum(Math.round(revPerClip))}/คลิป`, color: 'bg-sky-500', icon: Activity, sortKey: 2 };
+      if (clipCount >= 5) return { product: p, rec: 'ลองมุมใหม่', reason: `ลงไป ${clipCount} คลิป — รายได้คอม/คลิปยังต่ำ`, color: 'bg-amber-500', icon: Lightbulb, sortKey: 1 };
+      
+      return { product: p, rec: 'เทสต่อ', reason: 'ยังต้องเก็บสถิติเพิ่ม', color: 'bg-slate-400', icon: Activity, sortKey: 0 };
+    }).filter(Boolean).sort((a, b) => b.sortKey - a.sortKey);
+  }, [products, clips, days]);
+
   const abcdStats = useMemo(() => {
     const stats = { A: { gmv: 0, count: 0 }, B: { gmv: 0, count: 0 }, C: { gmv: 0, count: 0 }, D: { gmv: 0, count: 0 } };
     recent.filter(c => !c.isV).forEach(c => { const p = products.find(pp => pp.id === c.productId); if (p?.category && stats[p.category]) { stats[p.category].gmv += Number(c.gmv) || 0; stats[p.category].count += 1; } });
@@ -1215,7 +1265,7 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
               const unitsNeeded = i.commPerOrder > 0 ? Math.ceil(revenueTarget / i.commPerOrder) : 0;
               return (
                 <div key={i.product.id} className="bg-[#04342d]/80 border border-[#064a3f] p-4 rounded-2xl flex flex-col justify-between hover:bg-[#05443a] transition-colors">
-                  <div className="flex items-start justify-between gap-2"><span className="font-display text-sm text-white font-bold leading-tight">{i.product.name}</span><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${getAbcdInfo(i.product.category).bg}`}>{i.product.category}</span></div>
+                  <div className="flex items-start justify-between gap-2"><span className="font-display text-sm text-white font-bold leading-tight line-clamp-1">{i.product.name}</span><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${getAbcdInfo(i.product.category).bg}`}>{i.product.category}</span></div>
                   <div className="flex justify-between items-baseline pt-4 border-t border-[#064239]/60 mt-3 text-xs"><span className="text-emerald-300 font-medium font-mono">฿{fmtNum(i.commPerOrder)} คอม/ชิ้น</span><span className="font-display text-sm text-[#bcd924] font-bold font-mono">ต้องขาย {fmtNum(unitsNeeded)} ชิ้น</span></div>
                 </div>
               );
@@ -1225,6 +1275,34 @@ function DashboardView({ products, clips, appSettings, onUpdateSettings, onMakeS
       </div>
 
       <div className="flex justify-end gap-1.5 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm self-end">{['7', '30', '90'].map(d => (<button key={d} onClick={() => setPeriod(d)} className={`text-xs font-bold px-4 py-2 rounded-xl border transition-all ${period === d ? 'bg-[#012b25] text-white border-transparent' : 'bg-slate-50 text-slate-500'}`}>{d} วันล่าสุด</button>))}</div>
+
+      {/* ✅ 2. กระดาน UI แสดงผล AI Recommendations ที่เพิ่มเข้ามา */}
+      {recommendations && recommendations.length > 0 && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Wand2 className="w-5 h-5 text-purple-600" /> AI Action Plan (เข็มทิศสั่งการประจำวัน)</h3>
+          </div>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">วิเคราะห์ความคุ้มค่าจาก กำไรค่าคอมมิชชัน VS ความถี่การลงคลิป ({period} วันล่าสุด)</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            {recommendations.map((rec) => {
+              const Icon = rec.icon;
+              return (
+                <div key={rec.product.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-start gap-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+                  <div className={`absolute top-0 left-0 w-1.5 h-full ${rec.color}`}></div>
+                  <div className={`p-2.5 rounded-xl text-white shadow-sm flex-shrink-0 mt-0.5 ${rec.color}`}><Icon className="w-4 h-4" /></div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="font-display font-bold text-sm text-[#012b25] truncate pr-2">{rec.product.name}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md text-white whitespace-nowrap shadow-sm ${rec.color}`}>{rec.rec}</span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed font-medium">{rec.reason}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {portfolioBalance && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
