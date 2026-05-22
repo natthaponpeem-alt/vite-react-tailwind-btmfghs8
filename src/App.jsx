@@ -6,14 +6,14 @@ import {
   Trophy, Search, RefreshCw, DollarSign, Activity, LayoutGrid, 
   List, ArrowUpDown, ExternalLink, Database, Flame, TrendingUp, 
   TrendingDown, AlertTriangle, Lightbulb, Repeat, Cloud, CloudOff, 
-  User, Bell, CalendarDays, LogOut
+  User, Bell, CalendarDays
 } from 'lucide-react';
 
 // ============================================================================
 // [ZONE 1] FIREBASE CONFIGURATION & CONSTANTS
 // ============================================================================
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -27,7 +27,6 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const googleProvider = new GoogleAuthProvider();
 const db = getFirestore(app);
 const APP_ID = 'peem6pack-command-v1';
 
@@ -95,24 +94,30 @@ function getStatsPending(clips) {
   return { pending24h, pending7d }; 
 }
 
-// ✅ บังคับฐานคะแนนเต็มที่ 18 เสมอ ไม่ว่าช่องจะกรอกครบหรือไม่
 function calcScore(sc = {}) { 
-  let total = 0, max = 18; 
+  let total = 0, max = 18; // 👈 บังคับฐานคะแนนเต็มที่ 18 เสมอ!
   const cv = (v) => v === '' || v === null || v === undefined ? null : Number(v); 
+  
   const commission = cv(sc.commission); 
   if (commission !== null && !isNaN(commission)) { total += commission >= 20 ? 3 : commission >= 15 ? 2 : commission >= 10 ? 1 : 0; } 
+  
   const g7 = cv(sc.gmv7dPct), g30 = cv(sc.gmv30dPct); 
   if (g7 !== null && g30 !== null && !isNaN(g7) && !isNaN(g30)) { if (g7 > 0 && g30 > 0) total += 3; else if (g7 < 0 && g30 < 0) total += 1; else total += 2; } 
   else if (g7 !== null && !isNaN(g7)) { total += g7 > 0 ? 2 : 1; } 
   else if (g30 !== null && !isNaN(g30)) { total += g30 > 0 ? 2 : 1; } 
+  
   const creators = cv(sc.creatorCount); 
   if (creators !== null && !isNaN(creators)) { total += creators <= 500 ? 3 : creators <= 1000 ? 2 : 1; } 
+  
   const angles = cv(sc.anglesCount); 
   if (angles !== null && !isNaN(angles)) { total += angles >= 3 ? 3 : angles >= 2 ? 2 : 1; } 
+  
   const cr = cv(sc.crPct); 
   if (cr !== null && !isNaN(cr)) { total += cr >= 20 ? 3 : cr >= 10 ? 2 : 1; } 
+  
   const conc = cv(sc.concentration); 
   if (conc !== null && !isNaN(conc)) { total += conc < 30 ? 3 : conc <= 60 ? 2 : 1; } 
+  
   return { total, max, pct: Math.round((total / max) * 100) }; 
 }
 
@@ -193,52 +198,10 @@ function migrateProduct(p) { if (!p) return p; const sc = p.scorecard || {}; if 
 function migrateClip(c) { if (!c) return c; if (c.views !== undefined && c.views7d === undefined) { c.views7d = c.views; delete c.views; } if (c.link !== undefined && c.videoLink === undefined) { c.videoLink = c.link; delete c.link; } return c; }
 
 // ============================================================================
-// [ZONE 2.5] SECURE LOGIN SCREEN
-// ============================================================================
-function LoginScreen({ onLogin, isLoading, errorMsg }) {
-  return (
-    <div className="min-h-screen bg-[#012b25] flex flex-col items-center justify-center p-6 relative overflow-hidden" style={{ fontFamily: "'Inter', 'Noto Sans Thai', sans-serif" }}>
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-[#d9eb54]/10 rounded-full blur-3xl animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }}></div>
-      
-      <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-10 rounded-[3rem] w-full max-w-md text-center shadow-2xl relative z-10">
-        <div className="w-20 h-20 bg-[#d9eb54] text-[#012b25] rounded-3xl flex items-center justify-center font-extrabold text-4xl shadow-[0_0_40px_rgba(217,235,84,0.3)] mx-auto mb-6 transform -rotate-6">P6</div>
-        <h1 className="font-bold text-3xl text-white mb-2 tracking-tight">Command Center</h1>
-        <p className="text-emerald-100/60 text-sm mb-8">ระบบบริหารจัดการพอร์ต Affiliate ส่วนบุคคล</p>
-        
-        {errorMsg && (
-          <div className="bg-rose-500/20 border border-rose-500/50 text-rose-200 text-xs px-4 py-3 rounded-xl mb-6 flex items-center gap-2 text-left">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" /> {errorMsg}
-          </div>
-        )}
-
-        <button 
-          onClick={onLogin} 
-          disabled={isLoading}
-          className="w-full bg-white hover:bg-slate-50 text-slate-800 font-bold py-4 rounded-2xl shadow-lg transition-all flex items-center justify-center gap-3 disabled:opacity-70 group"
-        >
-          {isLoading ? (
-            <RefreshCw className="w-5 h-5 animate-spin text-slate-400" />
-          ) : (
-            <svg className="w-5 h-5 group-hover:scale-110 transition-transform" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-          )}
-          {isLoading ? 'กำลังเชื่อมต่อ...' : 'เข้าสู่ระบบด้วย Google'}
-        </button>
-        <div className="mt-8 flex items-center justify-center gap-2 text-[10px] text-emerald-100/40"><Lock className="w-3 h-3" /><span>Secured by Firebase Auth</span></div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// [ZONE 3] MAIN APPLICATION & CLOUD LIFECYCLE
+// [ZONE 3] MAIN APPLICATION & CLOUD LIFECYCLE (Pharmly Architecture)
 // ============================================================================
 export default function App() {
   const [user, setUser] = useState(null);
-  const [authChecking, setAuthChecking] = useState(true);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [loginError, setLoginError] = useState(null);
-  
   const [dbInitialized, setDbInitialized] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [page, setPage] = useState('home');
@@ -268,43 +231,18 @@ export default function App() {
   const [confirmDeleteClipId, setConfirmDeleteClipId] = useState(null);
   const [confirmClearDb, setConfirmClearDb] = useState(false);
   const [makeSimilarClip, setMakeSimilarClip] = useState(null);
-  const [showGateWarning, setShowGateWarning] = useState(null); 
   const [showBackup, setShowBackup] = useState(false);
+  const [showGateWarning, setShowGateWarning] = useState(null); 
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
-  // ✅ ฟังสถานะการ Login ของ Google
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setAuthChecking(false);
-      if (!currentUser) setDbInitialized(false);
-    });
-    return unsubscribe;
+    signInAnonymously(auth).catch(err => showToast("เชื่อมคลาวด์ล้มเหลว", "error"));
+    return onAuthStateChanged(auth, setUser);
   }, []);
 
-  const handleGoogleLogin = async () => {
-    setIsLoggingIn(true);
-    setLoginError(null);
-    try {
-      await signInWithPopup(auth, googleProvider);
-      showToast("เข้าสู่ระบบสำเร็จ!", "success");
-    } catch (error) {
-      setLoginError(error.message);
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleLogout = () => {
-    if (window.confirm("คุณต้องการออกจากระบบและล็อกบัญชีใช่หรือไม่?")) {
-      signOut(auth).then(() => {
-        setProducts([]); setClips([]); setPage('home');
-      });
-    }
-  };
-
   useEffect(() => {
-    if (!user) return; // ถ้ายังไม่ล็อกอิน ให้รอไปก่อน
+    if (!user) return;
     setIsSyncing(true);
 
     const settingsRef = doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings');
@@ -312,8 +250,7 @@ export default function App() {
       if (snap.exists()) {
         setAppSettings({
           monthlyTarget: snap.data().monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET,
-          noticeBoard: snap.data().noticeBoard || '',
-          monthlyRevenueTarget: snap.data().monthlyRevenueTarget || MONTHLY_REVENUE_TARGET
+          noticeBoard: snap.data().noticeBoard || ''
         });
       }
     });
@@ -441,24 +378,19 @@ export default function App() {
 
   const selectedProduct = selectedProductId ? products.find(p => p.id === selectedProductId) : null;
   const lockedProducts = useMemo(() => products.filter(p => p.locked && p.locked.month === currentMonth()), [products]);
-  
-  // ✅ ตรวจจับสินค้าขาดการประเมิน (Stale)
   const productsNeedingRescore = useMemo(() => products.filter(p => !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS), [products]);
-  
   const last7DaysClips = useMemo(() => {
     const cutoff = Date.now() - 7 * 86400000;
     return clips.filter(c => new Date(c.postedAt).getTime() >= cutoff).sort((a, b) => new Date(a.postedAt) - new Date(b.postedAt));
   }, [clips]);
 
-  // ✅ ประตูป้องกันหน้าแรก ถ้ายังไม่ล็อกอินให้หยุด
-  if (authChecking) {
-    return <div className="min-h-screen bg-[#012b25] flex flex-col items-center justify-center space-y-4"><div className="w-14 h-14 border-4 border-[#034c40] border-t-[#d9eb54] rounded-full animate-spin"></div><div className="font-mono text-emerald-500 tracking-wider text-xs animate-pulse">CHECKING SECURE ACCESS...</div></div>;
-  }
-  if (!user) {
-    return <LoginScreen onLogin={handleGoogleLogin} isLoading={isLoggingIn} errorMsg={loginError} />;
-  }
   if (!dbInitialized) {
-    return <div className="min-h-screen bg-[#012b25] flex flex-col items-center justify-center space-y-4"><div className="w-14 h-14 border-4 border-[#034c40] border-t-[#d9eb54] rounded-full animate-spin"></div><div className="font-mono text-emerald-500 tracking-wider text-xs animate-pulse">SYNCING CLOUD DATABASE...</div></div>;
+    return (
+      <div className="min-h-screen bg-[#061b17] flex flex-col items-center justify-center space-y-4">
+        <div className="w-14 h-14 border-4 border-emerald-950 border-t-lime-300 rounded-full animate-spin"></div>
+        <div className="font-semibold text-emerald-100 tracking-wider text-sm animate-pulse">PEEM6PACK COMMAND CENTER INITIALIZING...</div>
+      </div>
+    );
   }
 
   return (
@@ -529,21 +461,12 @@ export default function App() {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             </div>
             <button className="p-2.5 bg-[#f3f6f5] hover:bg-slate-200/60 rounded-full transition-all text-slate-600 relative"><Bell className="w-4 h-4" /><span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border border-white" /></button>
-            <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
-              {user?.photoURL ? (
-                <img src={user.photoURL} alt="Profile" className="w-9 h-9 rounded-full shadow-sm border border-slate-200 object-cover" />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-emerald-950 text-[#d9eb54] flex items-center justify-center font-bold shadow-md uppercase">{user?.email ? user.email.charAt(0) : <User className="w-4 h-4" />}</div>
-              )}
-              <div className="text-left hidden md:block">
-                <div className="text-xs font-bold text-[#012b25] truncate max-w-[120px]">{user?.displayName || 'Commander'}</div>
-                <div className="text-[10px] text-slate-400 font-medium font-mono truncate max-w-[120px]">{user?.email || 'Logged In'}</div>
-              </div>
-              <button onClick={handleLogout} className="ml-1 p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all" title="ออกจากระบบ">
-                <LogOut className="w-4 h-4" />
-              </button>
+            <div className="flex items-center gap-3 pl-2 border-l border-slate-200">
+              <div className="w-10 h-10 rounded-full bg-emerald-950 text-[#d9eb54] flex items-center justify-center font-bold shadow-md"><User className="w-5 h-5" /></div>
+              <div className="text-left hidden md:block"><div className="text-xs font-bold text-[#012b25]">James Bond</div><div className="text-[10px] text-slate-400 font-medium">@james.bond</div></div>
             </div>
-      
+          </div>
+        </header>
 
         <div className="p-6 md:p-8 space-y-8">
           {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
@@ -1001,7 +924,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
               const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
               const comm = p.scorecard?.commission || 0;
               const rawTrend = p.scorecard?.gmv30dPct;
-              const hasTrend = rawTrend !== undefined && rawTrend !== null && rawTrend !== ''; 
+              const hasTrend = rawTrend !== undefined && rawTrend !== null && rawTrend !== ''; // ✅ ดักจับค่า Trend ให้แม่นยำขึ้น
               const trendIsUp = Number(rawTrend) > 0;
 
               return (
@@ -1046,7 +969,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                   const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
                   const comm = Number(p.scorecard?.commission) || 0;
                   const rawTrend = p.scorecard?.gmv30dPct;
-                  const hasTrend = rawTrend !== undefined && rawTrend !== null && rawTrend !== '';
+                  const hasTrend = rawTrend !== undefined && rawTrend !== null && rawTrend !== ''; // ✅ ดักจับค่า Trend ให้แม่นยำ
                   const trendIsUp = Number(rawTrend) > 0;
 
                   return (
@@ -2090,13 +2013,16 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
     const monthlyRecord = { [selectedMonth]: ghost.totalGmv };
     const isCurrentMonth = selectedMonth === currentMonth();
 
+    const initialScorecard = { commission: ghost.commission > 0 ? String(ghost.commission) : '' };
+    const s = calcScore(initialScorecard);
+
     onQuickAdd({
       name: ghost.name, brand: ghost.brand, tiktokProductId: ghost.tiktokProductId, price: ghost.price,
       isShopAds: ghost.isShopAds, 
       gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', 
       productType: autoType, 
-      scorecard: { commission: ghost.commission > 0 ? String(ghost.commission) : '' },
-      score: 0, maxScore: 18, scorePct: 0, decision: 'WAIT', // 👈 ให้คะแนนเป็นศูนย์เพื่อรอประเมิน
+      scorecard: initialScorecard,
+      score: s.total, maxScore: s.max, scorePct: s.pct, decision: 'WAIT', // 👈 บังคับให้ติด WAIT ไว้ก่อน
       salesData: { last30d: isCurrentMonth ? ghost.totalGmv : 0, monthly: monthlyRecord, last7d: 0, updatedAt: new Date().toISOString() },
       category: ghost.totalGmv >= 10000 ? 'B' : 'C',
       lastScoredAt: null // 👈 ตั้งเป็น null เพื่อให้เด้งเข้ากล่องสีส้ม PENDING ทันที!
