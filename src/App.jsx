@@ -1365,12 +1365,13 @@ const inputStyles = "w-full px-4 py-3 bg-[#f3f6f5] border border-transparent rou
 function AddProductModal({ onClose, onSave, showToast }) {
   const [name, setName] = useState(''); const [brand, setBrand] = useState('');
   const [category, setCategory] = useState('A'); const [productType, setProductType] = useState('supplement');
-  
-  // ✅ 1. เพิ่ม State สำหรับเก็บรหัส TikTok Product ID
   const [tiktokProductId, setTiktokProductId] = useState('');
-
   const [tiktokLink, setTiktokLink] = useState(''); const [kalodataLink, setKalodataLink] = useState('');
-  const [gmvMaxPct, setGmvMaxPct] = useState(''); const [pillars, setPillars] = useState([]);
+  
+  // ✅ ตัวแปร GMV Max %
+  const [gmvMaxPct, setGmvMaxPct] = useState(''); 
+  
+  const [pillars, setPillars] = useState([]);
   const [tiktokRank, setTiktokRank] = useState(''); const [price, setPrice] = useState('');
   const [sales7d, setSales7d] = useState(''); const [sales30d, setSales30d] = useState('');
   const [sc, setSc] = useState({ commission: '', gmv7dPct: '', gmv30dPct: '', creatorCount: '', anglesCount: '', crPct: '', concentration: '' });
@@ -1384,8 +1385,7 @@ function AddProductModal({ onClose, onSave, showToast }) {
     if (!usedReal || !scopeOK) { if (!window.confirm('⚠️ ข้ามมาตรการ 2-Rules Gate ยืนยันบันทึกต่อหรือไม่?')) return; }
     const salesData = (sales7d || sales30d) ? { last7d: Number(sales7d) || 0, last30d: Number(sales30d) || 0, updatedAt: new Date().toISOString() } : null;
     
-    // ✅ 2. ส่ง tiktokProductId ไปบันทึกลง Cloud ด้วย
-    onSave({ name, brand, category, productType, tiktokLink, kalodataLink, gmvMaxPct, pillars, scorecard: sc, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, salesData, isShopAds, usedReal, scopeOK, tiktokProductId });
+    onSave({ name, brand, category, productType, tiktokLink, kalodataLink, gmvMaxPct: isShopAds ? String(gmvMaxPct) : '', pillars, scorecard: sc, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, salesData, isShopAds, usedReal, scopeOK, tiktokProductId });
     onClose();
   };
 
@@ -1396,7 +1396,6 @@ function AddProductModal({ onClose, onSave, showToast }) {
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4 shadow-sm"><div className="text-xs font-bold text-amber-900 mb-2 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> 2-Rules Gate เช็คความเสี่ยง</div><label className="flex items-start gap-2 text-xs cursor-pointer mb-2"><input type="checkbox" checked={usedReal} onChange={e => setUsedReal(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[#012b25] rounded" /><span><strong>ใช้จริงแล้ว</strong> หรือ First Impression</span></label><label className="flex items-start gap-2 text-xs cursor-pointer"><input type="checkbox" checked={scopeOK} onChange={e => setScopeOK(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[#012b25] rounded" /><span><strong>อยู่ใน Scope</strong> ของช่อง</span></label></div>
       <FormField label="ชื่อสินค้า *"><input value={name} onChange={e => setName(e.target.value)} autoFocus className={inputStyles} placeholder="เช่น Oxyflow รองเท้า" /></FormField>
       
-      {/* ✅ 3. เพิ่มช่องกรอกรหัส TikTok ตรงนี้ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
         <FormField label="แบรนด์ / ร้านค้า"><input value={brand} onChange={e => setBrand(e.target.value)} className={inputStyles} placeholder="ชื่อแบรนด์" /></FormField>
         <FormField label="🔗 รหัสสินค้า TikTok (Product ID) 🔑" hint="ตัวเลข 19 หลัก จากแอป (เว้นว่างไว้สแกนหาทีหลังได้)">
@@ -1405,14 +1404,27 @@ function AddProductModal({ onClose, onSave, showToast }) {
       </div>
 
       <FormField label="ประเภทผลิตภัณฑ์"><div className="grid grid-cols-2 md:grid-cols-4 gap-2">{PRODUCT_TYPES.slice(0, 4).map(t => (<button key={t.id} onClick={() => setProductType(t.id)} className={`text-[11px] font-bold p-3 rounded-xl border transition-all text-left truncate ${productType === t.id ? 'bg-[#012b25] text-white border-[#012b25] shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{t.emoji} {t.label}</button>))}</div></FormField>
-      <FormField><label className="flex items-center gap-3 cursor-pointer p-4 bg-rose-50/50 border border-rose-100 rounded-2xl hover:bg-rose-50 transition-all"><input type="checkbox" checked={isShopAds} onChange={e => setIsShopAds(e.target.checked)} className="w-5 h-5 text-rose-600 rounded accent-rose-600 bg-white" /><span className="text-sm font-semibold text-rose-900">🛒 <strong>ตะกร้าแดง (Shop Ads)</strong> — มี GMV Max โชว์ในแอป</span></label></FormField>
+      
+      {/* ✅ เพิ่มช่อง GMV Max % ควบคู่กับตะกร้าแดง */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
+        <FormField>
+          <label className="flex items-center gap-3 cursor-pointer p-4 bg-rose-50/50 border border-rose-100 rounded-2xl hover:bg-rose-50 transition-all h-full">
+            <input type="checkbox" checked={isShopAds} onChange={e => setIsShopAds(e.target.checked)} className="w-5 h-5 text-rose-600 rounded accent-rose-600 bg-white" />
+            <span className="text-sm font-semibold text-rose-900">🛒 <strong>ตะกร้าแดง (Shop Ads)</strong></span>
+          </label>
+        </FormField>
+        <FormField label="⚡ GMV MAX % (โฆษณาร้านค้า)">
+          <input type="number" step="0.1" value={gmvMaxPct} onChange={e => setGmvMaxPct(e.target.value)} className={`${inputStyles} font-mono font-bold text-amber-600`} placeholder="เช่น 15.5" disabled={!isShopAds} />
+        </FormField>
+      </div>
+
       <FormField label="จัดหมวด ABCD">
         {(sales30d || sc.commission || tiktokRank) && (<div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 mb-4 text-xs shadow-sm"><div className="font-bold text-purple-900 mb-1 flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> AI แนะนำหมวด: <span className="text-base ml-1">{suggestion.label}</span></div><div className="text-purple-700/80 mb-3">{suggestion.reason}</div>{category !== suggestion.cat && <button onClick={() => setCategory(suggestion.cat)} className="text-[10px] font-bold bg-purple-600 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-purple-700">ประทับตราหมวด {suggestion.cat}</button>}</div>)}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{Object.entries(ABCD_INFO).filter(([k]) => k !== 'V').map(([k, info]) => (<button key={k} onClick={() => setCategory(k)} className={`p-4 text-left rounded-2xl border transition-all ${category === k ? `${info.bg} text-white shadow-md border-transparent` : 'bg-white border-slate-200 hover:bg-slate-50'}`}><div className="font-bold text-sm">{info.label}</div><div className={`text-[10px] mt-1 ${category === k ? 'text-white/80' : 'text-slate-400'}`}>{info.desc}</div></button>))}</div>
       </FormField>
       <div className="grid grid-cols-2 gap-3"><FormField label="💰 ราคาขาย (฿)"><input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} className={inputStyles} placeholder="299" /></FormField><FormField label="🏆 TikTok Rank"><input type="number" min="1" value={tiktokRank} onChange={e => setTiktokRank(e.target.value)} className={inputStyles} placeholder="1" /></FormField></div>
       <div className="border-t border-slate-100 pt-5 mt-4 bg-emerald-50/50 -mx-6 px-6 py-5"><h3 className="font-display text-sm text-[#012b25] mb-3 flex items-center gap-1.5"><Activity className="w-5 h-5 text-emerald-600"/> ยอดขายแมนนวล (จาก TikTok)</h3><div className="grid grid-cols-2 gap-3"><FormField label="GMV 7 วัน ฿"><input type="number" value={sales7d} onChange={e => setSales7d(e.target.value)} className={`${inputStyles} bg-white shadow-sm font-mono`} placeholder="0" /></FormField><FormField label="GMV 30 วัน ฿ (แนะนำ)"><input type="number" value={sales30d} onChange={e => setSales30d(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-emerald-100 font-mono`} placeholder="0" /></FormField></div></div>
-      <div className="border-t border-slate-100 pt-5 mt-4"><h3 className="font-display text-sm text-[#012b25] mb-4 flex items-center gap-1.5"><Target className="w-5 h-5 text-[#012b25]"/> ข้อมูลประเมิน (Argoon Scorecard)</h3><div className="grid grid-cols-2 gap-3 mb-2"><FormField label="Commission %"><input type="number" value={sc.commission} onChange={e => setSc({ ...sc, commission: e.target.value })} className={inputStyles} /></FormField><FormField label="Creator Count"><input type="number" value={sc.creatorCount} onChange={e => setSc({ ...sc, creatorCount: e.target.value })} className={inputStyles} /></FormField></div><div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 mb-2"><div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">GMV Momentum Trend</div><div className="grid grid-cols-2 gap-3"><FormField label="% Growth 7d"><input type="number" step="0.1" value={sc.gmv7dPct} onChange={e => setSc({ ...sc, gmv7dPct: e.target.value })} className={`${inputStyles} bg-white font-mono`} /></FormField><FormField label="% Growth 30d"><input type="number" step="0.1" value={sc.gmv30dPct} onChange={e => setSc({ ...sc, gmv30dPct: e.target.value })} className={`${inputStyles} bg-white font-mono`} /></FormField></div></div><div className="grid grid-cols-3 gap-2"><FormField label="Angles"><input type="number" value={sc.anglesCount} onChange={e => setSc({ ...sc, anglesCount: e.target.value })} className={inputStyles} /></FormField><FormField label="CR %"><input type="number" value={sc.crPct} onChange={e => setSc({ ...sc, crPct: e.target.value })} className={inputStyles} /></FormField><FormField label="Concentration"><input type="number" value={sc.concentration} onChange={e => setSc({ ...sc, concentration: e.target.value })} className={inputStyles} /></FormField></div></div>
+      <div className="border-t border-slate-100 pt-5 mt-4"><h3 className="font-display text-sm text-[#012b25] mb-4 flex items-center gap-1.5"><Target className="w-5 h-5 text-[#012b25]"/> ข้อมูลประเมิน (Argoon Scorecard)</h3><div className="grid grid-cols-2 gap-3 mb-2"><FormField label="Commission % (มาตรฐาน)"><input type="number" value={sc.commission} onChange={e => setSc({ ...sc, commission: e.target.value })} className={inputStyles} placeholder="ค่าคอม Organic" /></FormField><FormField label="Creator Count"><input type="number" value={sc.creatorCount} onChange={e => setSc({ ...sc, creatorCount: e.target.value })} className={inputStyles} /></FormField></div><div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 mb-2"><div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">GMV Momentum Trend</div><div className="grid grid-cols-2 gap-3"><FormField label="% Growth 7d"><input type="number" step="0.1" value={sc.gmv7dPct} onChange={e => setSc({ ...sc, gmv7dPct: e.target.value })} className={`${inputStyles} bg-white font-mono`} /></FormField><FormField label="% Growth 30d"><input type="number" step="0.1" value={sc.gmv30dPct} onChange={e => setSc({ ...sc, gmv30dPct: e.target.value })} className={`${inputStyles} bg-white font-mono`} /></FormField></div></div><div className="grid grid-cols-3 gap-2"><FormField label="Angles"><input type="number" value={sc.anglesCount} onChange={e => setSc({ ...sc, anglesCount: e.target.value })} className={inputStyles} /></FormField><FormField label="CR %"><input type="number" value={sc.crPct} onChange={e => setSc({ ...sc, crPct: e.target.value })} className={inputStyles} /></FormField><FormField label="Concentration"><input type="number" value={sc.concentration} onChange={e => setSc({ ...sc, concentration: e.target.value })} className={inputStyles} /></FormField></div></div>
     </Modal>
   );
 }
@@ -1420,21 +1432,22 @@ function AddProductModal({ onClose, onSave, showToast }) {
 function EditProductInfoModal({ product, onClose, onSave }) {
   const [name, setName] = useState(product?.name || ''); const [brand, setBrand] = useState(product?.brand || '');
   const [productType, setProductType] = useState(product?.productType || 'supplement');
-  
-  // ✅ 4. ดึงค่า TikTok ID เดิมมาโชว์ (ถ้าเคยกรอกไว้แล้ว)
   const [tiktokProductId, setTiktokProductId] = useState(product?.tiktokProductId || ''); 
-  
   const [tiktokLink, setTiktokLink] = useState(product?.tiktokLink || ''); const [kalodataLink, setKalodataLink] = useState(product?.kalodataLink || '');
   const [tiktokRank, setTiktokRank] = useState(product?.tiktokRank || ''); const [price, setPrice] = useState(product?.price || '');
   const [isShopAds, setIsShopAds] = useState(!!product?.isShopAds);
+  
+  // ✅ โหลดค่า gmvMaxPct เดิม
+  const [gmvMaxPct, setGmvMaxPct] = useState(product?.gmvMaxPct || '');
+  
   const [sales7d, setSales7d] = useState(product?.salesData?.last7d || ''); const [sales30d, setSales30d] = useState(product?.salesData?.last30d || '');
   if (!product) return null;
   const suggestion = useMemo(() => autoClassify({ gmv30d: sales30d, commission: product.scorecard?.commission, tiktokRank, price }), [sales30d, product.scorecard?.commission, tiktokRank, price]);
   
   const handleSave = () => {
     const salesData = (sales7d || sales30d) ? { last7d: Number(sales7d) || 0, last30d: Number(sales30d) || 0, updatedAt: new Date().toISOString() } : product.salesData;
-    // ✅ 5. ส่ง tiktokProductId อัปเดตขึ้น Cloud
-    onSave({ name, brand, productType, tiktokProductId, tiktokLink, kalodataLink, tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, isShopAds, salesData });
+    // ✅ ส่ง gmvMaxPct อัปเดต
+    onSave({ name, brand, productType, tiktokProductId, tiktokLink, kalodataLink, gmvMaxPct: isShopAds ? String(gmvMaxPct) : '', tiktokRank: tiktokRank ? Number(tiktokRank) : null, price: price ? Number(price) : null, isShopAds, salesData });
   };
   
   const footer = (<button onClick={handleSave} className="w-full bg-[#012b25] text-white hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2"><Edit3 className="w-4 h-4"/> อัปเดตข้อมูลสเปกสินค้า</button>);
@@ -1443,7 +1456,6 @@ function EditProductInfoModal({ product, onClose, onSave }) {
     <Modal title="⚙️ แก้ไขข้อมูล (Info)" onClose={onClose} size="lg" footer={footer}>
       <FormField label="ชื่อสินค้า"><input value={name} onChange={e => setName(e.target.value)} className={inputStyles} /></FormField>
       
-      {/* ✅ 6. ช่องแก้ไขรหัส TikTok */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
         <FormField label="แบรนด์"><input value={brand} onChange={e => setBrand(e.target.value)} className={inputStyles} /></FormField>
         <FormField label="🔗 รหัสสินค้า TikTok (Product ID) 🔑" hint="รหัสสินค้า 19 หลักสำหรับเชื่อม Auto-Sync GMV">
@@ -1452,7 +1464,20 @@ function EditProductInfoModal({ product, onClose, onSave }) {
       </div>
 
       <FormField label="ประเภทผลิตภัณฑ์"><div className="grid grid-cols-2 md:grid-cols-4 gap-2">{PRODUCT_TYPES.slice(0,4).map(t => (<button key={t.id} onClick={() => setProductType(t.id)} className={`text-[11px] p-3.5 rounded-2xl border transition-all text-left font-bold ${productType === t.id ? 'bg-[#012b25] text-white border-[#012b25] shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{t.emoji} {t.label}</button>))}</div></FormField>
-      <FormField><label className="flex items-center gap-3 cursor-pointer p-4 bg-rose-50/50 border border-rose-100 rounded-2xl hover:bg-rose-50 transition-all"><input type="checkbox" checked={isShopAds} onChange={e => setIsShopAds(e.target.checked)} className="w-5 h-5 accent-rose-600 rounded bg-white" /><span className="text-sm font-semibold text-rose-900">🛒 <strong>ตะกร้าแดง (Shop Ads)</strong> — มีป้ายบอกระดับในแอป</span></label></FormField>
+      
+      {/* ✅ เพิ่มช่อง GMV Max คู่กับตะกร้าแดง */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
+        <FormField>
+          <label className="flex items-center gap-3 cursor-pointer p-4 bg-rose-50/50 border border-rose-100 rounded-2xl hover:bg-rose-50 transition-all h-full">
+            <input type="checkbox" checked={isShopAds} onChange={e => setIsShopAds(e.target.checked)} className="w-5 h-5 accent-rose-600 rounded bg-white" />
+            <span className="text-sm font-semibold text-rose-900">🛒 <strong>ตะกร้าแดง (Shop Ads)</strong></span>
+          </label>
+        </FormField>
+        <FormField label="⚡ GMV MAX % (โฆษณาร้านค้า)">
+          <input type="number" step="0.1" min="0" value={gmvMaxPct} onChange={e => setGmvMaxPct(e.target.value)} className={`${inputStyles} font-mono font-bold text-rose-600 bg-rose-50/30 focus:bg-white border-rose-100 disabled:opacity-50 disabled:bg-slate-100`} placeholder="เช่น 15.5" disabled={!isShopAds} />
+        </FormField>
+      </div>
+
       <div className="grid grid-cols-2 gap-3"><FormField label="💰 ราคาขาย (฿)"><input type="number" step="0.01" min="0" value={price} onChange={e => setPrice(e.target.value)} className={`${inputStyles} font-mono font-bold text-emerald-700`} /></FormField><FormField label="🏆 TikTok Rank"><input type="number" min="1" value={tiktokRank} onChange={e => setTiktokRank(e.target.value)} className={`${inputStyles} font-mono font-bold text-rose-600`} /></FormField></div>
       <div className="border-t border-slate-100 pt-5 mt-4 bg-emerald-50/50 -mx-6 px-6 py-5"><h3 className="font-display text-sm text-[#012b25] mb-3 flex items-center gap-2"><Activity className="w-5 h-5 text-emerald-600" /> อัปเดตยอดขายแมนนวล (จาก TikTok)</h3><div className="grid grid-cols-2 gap-3"><FormField label="ยอด 7 วัน (฿)"><input type="number" value={sales7d} onChange={e => setSales7d(e.target.value)} className={`${inputStyles} bg-white shadow-sm font-mono`} /></FormField><FormField label="ยอด 30 วัน (฿)"><input type="number" value={sales30d} onChange={e => setSales30d(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-emerald-100 font-mono`} /></FormField></div>{product.salesData?.updatedAt && <div className="text-[10px] font-bold text-emerald-700 bg-emerald-100/50 px-3 py-2 rounded-xl inline-block mt-1 border border-emerald-100">อัปเดตล่าสุดเมื่อ: {fmtDate(product.salesData.updatedAt)} ({daysSince(product.salesData.updatedAt)} วันก่อน)</div>}</div>
       {(sales30d || tiktokRank) && product.category !== suggestion.cat && (<div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 mt-4 shadow-sm"><div className="font-bold text-purple-900 mb-2 flex items-center gap-2"><Sparkles className="w-4 h-4"/> ระบบวิเคราะห์พอร์ต AI ตรวจพบการเปลี่ยนแปลง!</div><div className="text-xs font-medium text-purple-800 leading-relaxed mb-3">ปัจจุบันจัดอยู่ในหมวด <strong>{product.category}</strong> แต่ข้อมูลใหม่สอดคล้องกับ <strong>หมวด {suggestion.cat} ({suggestion.label})</strong> เนื่องจาก {suggestion.reason}</div><div className="text-[10px] font-bold text-slate-500 bg-white border border-slate-100 px-3 py-1.5 rounded-lg inline-block shadow-sm">💡 เปลี่ยนหมวดได้ที่หน้า Product Detail (กดที่ป้าย ABCD)</div></div>)}
@@ -1583,15 +1608,16 @@ function BackupModal({ products, clips, onClose, showToast }) {
 // ============================================================================
 // [ZONE 6] TIKTOK CSV RADAR & GHOST DETECTOR
 // ============================================================================
+// ============================================================================
+// [ZONE 6] TIKTOK CSV RADAR & GHOST DETECTOR
+// ============================================================================
 function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, showToast }) {
   const [rawData, setRawData] = useState('');
   const [parsedData, setParsedData] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // ✅ 1. ระบบเลือกเดือนที่สแกน (Month Selector) ป้องกันยอดทับซ้อน
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth()); // ค่าเริ่มต้นคือเดือนปัจจุบัน (YYYY-MM)
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth()); 
 
-  // ตัวช่วยสร้างตัวเลือกเดือนย้อนหลัง 6 เดือน
   const monthOptions = useMemo(() => {
     const opts = []; const now = new Date();
     for (let i = 0; i < 6; i++) {
@@ -1603,13 +1629,12 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
     return opts;
   }, []);
 
-  // ✅ 2. ตัวช่วยแยกประเภทสินค้าอัตโนมัติ (Auto-Categorize) จากชื่อ
   const detectProductType = (name) => {
     const n = name.toLowerCase();
     if (/รองเท้า|shoes|sneaker/i.test(n)) return 'shoes';
-    if (/เสื้อ|กางเกง|ชุด|ผ้า|กั๊ก|tank|shirt|shorts|apparel/i.test(n)) return 'apparel';
-    if (/โปรตีน|วิตามิน|ซิงค์|อาหารเสริม|creatine|prebiotic|เวย์|whey|gainer/i.test(n)) return 'supplement';
-    if (/บาร์|ดัมเบล|ลูกกลิ้ง|เสื่อ|เครื่องชั่ง|กระดาน|kettlebell|roller|push up/i.test(n)) return 'equipment';
+    if (/เสื้อ|กางเกง|ชุด|ผ้า|กั๊ก|tank|shirt|shorts|apparel|แขนกุด/i.test(n)) return 'apparel';
+    if (/โปรตีน|วิตามิน|ซิงค์|อาหารเสริม|creatine|prebiotic|เวย์|whey|gainer|d3|k2|fiber|collagen|gummies/i.test(n)) return 'supplement';
+    if (/บาร์|ดัมเบล|ลูกกลิ้ง|เสื่อ|เครื่องชั่ง|กระดาน|kettlebell|roller|push up|ลู่วิ่ง|สเต็ป/i.test(n)) return 'equipment';
     return 'other';
   };
 
@@ -1636,9 +1661,10 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
         const headers = parseRow(rows[0]).map(h => h.trim().replace(/^"|"$/g, ''));
         const idIdx = headers.indexOf('รหัสสินค้า'); const nameIdx = headers.indexOf('ชื่อสินค้า');
         const priceIdx = headers.indexOf('ราคา'); const brandIdx = headers.indexOf('ชื่อร้านค้า');
-        const gmvIdx = headers.indexOf('GMV'); const commIdx = headers.indexOf('มาตรฐาน');
+        const gmvIdx = headers.indexOf('GMV'); 
         
-        // คอลัมน์ที่เพิ่มใหม่
+        // ✅ 1. ดึงคอลัมน์ ค่าคอมฯ และ โฆษณาร้านค้า อย่างแม่นยำ
+        const commIdx = headers.indexOf('มาตรฐาน');
         const orderTypeIdx = headers.indexOf('ประเภทคำสั่งซื้อ');
         const shopAdsIdx = headers.indexOf('โฆษณาร้านค้า');
 
@@ -1652,28 +1678,29 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
           
           let gmvVal = Number((cols[gmvIdx] || '0').replace(/,/g, '')); if (isNaN(gmvVal)) gmvVal = 0;
           let priceVal = Number((cols[priceIdx] || '0').replace(/,/g, ''));
-          let commVal = cols[commIdx]?.includes('%') ? Number(cols[commIdx].replace('%','')) : 0;
           
-          // ✅ 3. เช็คสถานะโฆษณาร้านค้า และดึง GMV Max %
+          // ✅ 2. สกัดตัวเลขคอมมิชชันและโฆษณา (เช่นดึง 13 ออกจาก "12%/13%")
+          const commNumbers = cols[commIdx]?.match(/\d+(\.\d+)?/g);
+          const commVal = commNumbers ? Math.max(...commNumbers.map(Number)) : 0;
+          
           const isAdsOrder = cols[orderTypeIdx]?.includes('โฆษณาร้านค้า');
-          const rawAdsPct = cols[shopAdsIdx] || '';
-          // ดึงตัวเลขที่มากที่สุดออกมา (เช่น "12%/13%" จะได้ 13)
-          const adsNumbers = rawAdsPct.match(/\d+(\.\d+)?/g);
+          const adsNumbers = cols[shopAdsIdx]?.match(/\d+(\.\d+)?/g);
           const maxAdsPct = adsNumbers ? Math.max(...adsNumbers.map(Number)) : 0;
 
           if (!aggregated[pId]) {
             aggregated[pId] = {
               tiktokProductId: pId, name: cols[nameIdx] || 'ไม่ระบุชื่อ', brand: cols[brandIdx] || '',
-              price: isNaN(priceVal) ? 0 : priceVal, commission: isNaN(commVal) ? 0 : commVal, totalGmv: 0, orderCount: 0,
+              price: isNaN(priceVal) ? 0 : priceVal, commission: commVal, totalGmv: 0, orderCount: 0,
               isShopAds: false, gmvMaxPct: 0
             };
           }
           aggregated[pId].totalGmv += gmvVal;
           aggregated[pId].orderCount += 1;
           
-          // อัปเดตสถานะตะกร้าแดงและ % สูงสุดเสมอ
+          // ✅ 3. อัปเดตสถานะตะกร้าแดง ถ้าเจอบรรทัดไหนเคยยิงแอด ให้จำไว้ว่าคือตะกร้าแดงเสมอ
           if (isAdsOrder) aggregated[pId].isShopAds = true;
           if (maxAdsPct > aggregated[pId].gmvMaxPct) aggregated[pId].gmvMaxPct = maxAdsPct;
+          if (commVal > aggregated[pId].commission) aggregated[pId].commission = commVal; // เก็บค่าคอมสูงสุดไว้
         }
 
         const matched = []; const ghosts = [];
@@ -1695,43 +1722,51 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
       const p = item.product;
       const salesData = p.salesData || {};
       
-      // ✅ 4. อัปเดตยอดเข้าฐานข้อมูลรายเดือน (monthly ledger)
       const monthlyRecord = salesData.monthly || {};
       monthlyRecord[selectedMonth] = (monthlyRecord[selectedMonth] || 0) + item.totalGmv;
-      
-      // ถ้าข้อมูลที่อัปโหลดคือ "เดือนปัจจุบัน" ถึงจะไปอัปเดตช่อง last30d เพื่อให้ Dashboard คำนวณเป็นยอด Active
       const isCurrentMonth = selectedMonth === currentMonth();
       const new30d = isCurrentMonth ? (Number(salesData.last30d) || 0) + item.totalGmv : salesData.last30d;
 
-      // อัปเดต Shop Ads และ %GMV Max เฉพาะเมื่อระบบเจอค่าที่มากกว่าเดิม
+      // ✅ 4. อัปเดตตะกร้าแดง ค่าคอม และ คำนวณคะแนนใหม่ทันที (Auto-Calibration)
       const newIsShopAds = p.isShopAds || item.isShopAds;
       const newGmvMax = Math.max(Number(p.gmvMaxPct) || 0, item.gmvMaxPct);
+      const newComm = Math.max(Number(p.scorecard?.commission) || 0, item.commission);
+      
+      const newScorecard = { ...p.scorecard, commission: newComm > 0 ? String(newComm) : (p.scorecard?.commission || '') };
+      const s = calcScore(newScorecard);
 
       onUpdateProduct(p.id, { 
         isShopAds: newIsShopAds,
         gmvMaxPct: newGmvMax > 0 ? String(newGmvMax) : (p.gmvMaxPct || ''),
-        salesData: { ...salesData, last30d: new30d, monthly: monthlyRecord, updatedAt: new Date().toISOString() } 
+        scorecard: newScorecard,
+        score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct),
+        salesData: { ...salesData, last30d: new30d, monthly: monthlyRecord, updatedAt: new Date().toISOString() },
+        lastScoredAt: new Date().toISOString() // อัปเดตสถานะคัดกรองว่าทำแล้ว
       });
     });
-    showToast(`ซิงก์ยอดขาย ${parsedData.matched.length} สินค้า เข้าบัญชีเดือน ${selectedMonth} เรียบร้อย!`, 'success');
+    showToast(`ซิงก์ยอดขายและอัปเดต Score สินค้า ${parsedData.matched.length} รายการ เรียบร้อย!`, 'success');
     onClose();
   };
 
   const handleQuickAdd = (ghost) => {
-    const autoType = detectProductType(ghost.name); // 🤖 ให้ AI แยกหมวดสินค้า
-    
-    // ตั้งค่า GMV ลงสมุดบัญชีรายเดือน
+    const autoType = detectProductType(ghost.name); 
     const monthlyRecord = { [selectedMonth]: ghost.totalGmv };
     const isCurrentMonth = selectedMonth === currentMonth();
 
+    // ✅ 5. คำนวณ Argoon Score ตั้งแต่ตอนดึงเข้าพอร์ตครั้งแรก (ไม่เป็นค่าว่างอีกต่อไป)
+    const initialScorecard = { commission: ghost.commission > 0 ? String(ghost.commission) : '' };
+    const s = calcScore(initialScorecard);
+
     onQuickAdd({
       name: ghost.name, brand: ghost.brand, tiktokProductId: ghost.tiktokProductId, price: ghost.price,
-      isShopAds: ghost.isShopAds, // ✅ ติ๊กตะกร้าแดงอัตโนมัติ
-      gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', // ✅ ใส่ %GMV ให้อัตโนมัติ
-      productType: autoType, // ✅ จัดประเภทสินค้าอัตโนมัติ
-      scorecard: { commission: ghost.commission || '' },
+      isShopAds: ghost.isShopAds, // ติ๊กตะกร้าแดง
+      gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', // ยัด %GMV Max
+      productType: autoType, 
+      scorecard: initialScorecard,
+      score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct), // จัดคะแนนตั้งต้น
       salesData: { last30d: isCurrentMonth ? ghost.totalGmv : 0, monthly: monthlyRecord, last7d: 0, updatedAt: new Date().toISOString() },
-      category: ghost.totalGmv >= 10000 ? 'B' : 'C'
+      category: ghost.totalGmv >= 10000 ? 'B' : 'C',
+      lastScoredAt: new Date().toISOString()
     });
     setParsedData(prev => ({ ...prev, ghosts: prev.ghosts.filter(g => g.tiktokProductId !== ghost.tiktokProductId) }));
   };
@@ -1739,7 +1774,7 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
   const footer = parsedData ? (
     <div className="flex gap-3">
       <button onClick={() => setParsedData(null)} className="px-5 py-3.5 bg-slate-100 text-slate-700 font-bold rounded-2xl transition-all hover:bg-slate-200">สแกนไฟล์ใหม่</button>
-      <button onClick={handleSyncMatched} disabled={parsedData.matched.length === 0} className="flex-1 bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-3.5 rounded-2xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all"><RefreshCw className="w-5 h-5"/> อัปเดตสมุดบัญชีเข้าคลัง ({parsedData.matched.length} รายการ)</button>
+      <button onClick={handleSyncMatched} disabled={parsedData.matched.length === 0} className="flex-1 bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-3.5 rounded-2xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all"><RefreshCw className="w-5 h-5"/> อัปเดตสมุดบัญชี + ค่าคอมเข้าคลัง ({parsedData.matched.length} รายการ)</button>
     </div>
   ) : (
     <button onClick={processData} disabled={!rawData} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md flex items-center justify-center gap-2 disabled:opacity-50 transition-all">{isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5"/>} วิเคราะห์และสแกนข้อมูล</button>
@@ -1759,7 +1794,7 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
             </select>
           </div>
           <div className="bg-sky-50 border border-sky-100 p-4 rounded-2xl text-xs text-sky-800 leading-relaxed shadow-sm">
-            <strong>วิธีใช้งาน:</strong> เปิดหน้าคำสั่งซื้อในแอป TikTok Affiliate &gt; กด Export ข้อมูล &gt; เปิดไฟล์ Excel แล้ว <strong>Copy ข้อมูลตารางมาวาง (Paste) ในช่องด้านล่างนี้ได้เลย</strong> (ไม่ต้องลบหัวตาราง)
+            <strong>วิธีใช้งาน:</strong> เปิดหน้าคำสั่งซื้อในแอป TikTok Affiliate &gt; กด Export ข้อมูล &gt; เปิดไฟล์ Excel แล้ว <strong>Copy ข้อมูลตารางมาวาง (Paste) ในช่องด้านล่างนี้ได้เลย</strong> (ระบบจะดูดค่าคอม และ %โฆษณาร้านค้า ให้อัตโนมัติ)
           </div>
           <textarea value={rawData} onChange={(e) => setRawData(e.target.value)} className="w-full h-56 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-[10px] font-mono whitespace-pre focus:outline-none focus:border-[#012b25]/30 focus:ring-2 focus:ring-[#012b25]/10 resize-none shadow-inner" placeholder="คลิกขวา -> Paste ข้อมูลดิบจาก Excel ตรงนี้..."></textarea>
         </div>
@@ -1775,11 +1810,12 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
               <div className="max-h-[200px] overflow-y-auto">
                 <table className="w-full text-left text-xs"><thead className="bg-emerald-100/50 sticky top-0"><tr className="font-bold text-emerald-800"><th className="p-3">สินค้าในคลังของเรา</th><th className="p-3 text-right">จำนวนออเดอร์</th><th className="p-3 text-right">+ GMV ({selectedMonth})</th></tr></thead><tbody className="divide-y divide-emerald-50">
                   {parsedData.matched.length === 0 ? <tr><td colSpan="3" className="p-6 text-center text-slate-400 font-medium">ไม่มีข้อมูลยอดขายที่ตรงกับสินค้าในระบบ</td></tr> : parsedData.matched.map((m, i) => (
-                    <tr key={i} className="hover:bg-emerald-50/80"><td className="p-3"><div className="font-semibold text-[#012b25] line-clamp-1">{m.product.name}</div><div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-2"><span>ID: {m.tiktokProductId}</span>{m.isShopAds && <span className="bg-rose-100 text-rose-700 px-1 rounded font-bold font-sans">🛒 Ads {m.gmvMaxPct ? `${m.gmvMaxPct}%` : ''}</span>}</div></td><td className="p-3 text-right font-mono text-slate-600">{m.orderCount}</td><td className="p-3 text-right font-mono font-bold text-emerald-700">+฿{fmtNum(m.totalGmv)}</td></tr>
+                    <tr key={i} className="hover:bg-emerald-50/80"><td className="p-3"><div className="font-semibold text-[#012b25] line-clamp-1">{m.product.name}</div><div className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-2"><span>ID: {m.tiktokProductId}</span>{m.commission > 0 && <span className="bg-violet-100 text-violet-700 px-1.5 rounded font-bold font-sans">คอม {m.commission}%</span>}{m.isShopAds && <span className="bg-rose-100 text-rose-700 px-1.5 rounded font-bold font-sans">🛒 Ads {m.gmvMaxPct ? `${m.gmvMaxPct}%` : ''}</span>}</div></td><td className="p-3 text-right font-mono text-slate-600">{m.orderCount}</td><td className="p-3 text-right font-mono font-bold text-emerald-700">+฿{fmtNum(m.totalGmv)}</td></tr>
                   ))}
                 </tbody></table>
               </div>
             </div>
+            <p className="text-[10px] font-bold text-emerald-700 mt-2 ml-2 flex items-center gap-1"><Sparkles className="w-3 h-3 text-emerald-500"/> ระบบจะทำการอัปเดต "ค่าคอมมิชชัน %" และ "คะแนน Argoon Score" ให้ใหม่โดยอัตโนมัติ!</p>
           </div>
           <div>
             <h3 className="font-display text-base text-rose-800 mb-3 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-rose-500" /> 👻 สินค้าตกสำรวจ (Ghost Items) - {parsedData.ghosts.length} รายการ</h3>
@@ -1787,7 +1823,7 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
               <div className="max-h-[220px] overflow-y-auto">
                 <table className="w-full text-left text-xs"><thead className="bg-rose-100/50 sticky top-0"><tr className="font-bold text-rose-800"><th className="p-3">สินค้าที่ AI เจอในไฟล์</th><th className="p-3 text-right">ออเดอร์</th><th className="p-3 text-right">GMV รวม</th><th className="p-3 text-right">ดำเนินการ</th></tr></thead><tbody className="divide-y divide-rose-50">
                   {parsedData.ghosts.length === 0 ? <tr><td colSpan="4" className="p-6 text-center text-slate-400 font-medium">สุดยอด! ไม่มีสินค้าไหนรอดสายตาคุณไปได้เลย</td></tr> : parsedData.ghosts.map((g, i) => (
-                    <tr key={i} className="hover:bg-rose-50/80"><td className="p-3"><div className="font-semibold text-rose-900 line-clamp-1">{g.name}</div><div className="text-[10px] text-rose-600/70 mt-1 flex items-center gap-1.5 flex-wrap"><span className="bg-white px-1.5 py-0.5 border border-rose-200 rounded-md font-bold">{detectProductType(g.name).toUpperCase()}</span><span>{g.brand}</span><span className="font-mono">· คอม ≈{g.commission}%</span>{g.isShopAds && <span className="bg-rose-100 text-rose-700 px-1 rounded font-bold font-sans">🛒 Ads {g.gmvMaxPct ? `${g.gmvMaxPct}%` : ''}</span>}</div></td><td className="p-3 text-right font-mono text-rose-800">{g.orderCount}</td><td className="p-3 text-right font-mono font-bold text-rose-700">฿{fmtNum(g.totalGmv)}</td><td className="p-3 text-right"><button onClick={() => handleQuickAdd(g)} className="bg-[#012b25] text-[#d9eb54] px-4 py-2 rounded-xl font-bold hover:bg-[#033c32] shadow-sm transition-all">+ ดึงเข้าพอร์ต</button></td></tr>
+                    <tr key={i} className="hover:bg-rose-50/80"><td className="p-3"><div className="font-semibold text-rose-900 line-clamp-1">{g.name}</div><div className="text-[10px] text-rose-600/70 mt-1 flex items-center gap-1.5 flex-wrap"><span className="bg-white px-1.5 py-0.5 border border-rose-200 rounded-md font-bold">{detectProductType(g.name).toUpperCase()}</span><span>{g.brand}</span><span className="font-mono font-bold text-[#012b25] bg-emerald-100 px-1 border border-emerald-200 rounded">คอม {g.commission}%</span>{g.isShopAds && <span className="bg-rose-100 text-rose-700 px-1.5 rounded font-bold font-sans">🛒 Ads {g.gmvMaxPct ? `${g.gmvMaxPct}%` : ''}</span>}</div></td><td className="p-3 text-right font-mono text-rose-800">{g.orderCount}</td><td className="p-3 text-right font-mono font-bold text-rose-700">฿{fmtNum(g.totalGmv)}</td><td className="p-3 text-right"><button onClick={() => handleQuickAdd(g)} className="bg-[#012b25] text-[#d9eb54] px-4 py-2 rounded-xl font-bold hover:bg-[#033c32] shadow-sm transition-all">+ ดึงเข้าพอร์ต</button></td></tr>
                   ))}
                 </tbody></table>
               </div>
