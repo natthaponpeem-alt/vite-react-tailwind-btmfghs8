@@ -543,9 +543,7 @@ export default function App() {
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
-            </div>
-          </div>
-        </header>
+      
 
         <div className="p-6 md:p-8 space-y-8">
           {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
