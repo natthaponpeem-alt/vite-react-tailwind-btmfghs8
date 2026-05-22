@@ -1,482 +1,285 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Home, Package, Lock, BarChart3, Settings, Plus, X, Copy, Download, 
-  Upload, Trash2, Edit3, ChevronRight, ChevronLeft, AlertCircle, 
-  CheckCircle2, Clock, Zap, Target, Wand2, FileText, Sparkles, 
-  Trophy, Search, RefreshCw, DollarSign, Activity, LayoutGrid, 
-  List, ArrowUpDown, ExternalLink, Database, Flame, TrendingUp, 
-  TrendingDown, AlertTriangle, Lightbulb, Repeat, Cloud, CloudOff, 
-  User, Bell, CalendarDays
-} from 'lucide-react';
-
-// ============================================================================
-// [ZONE 1] FIREBASE CONFIGURATION & CONSTANTS
-// ============================================================================
+import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
+import { 
+  getFirestore, doc, collection, onSnapshot, setDoc, deleteDoc, query, orderBy 
+} from 'firebase/firestore';
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged, signOut 
+} from 'firebase/auth';
+
+// --- CONFIGURATION ---
+const APP_ID = "peem6pack_v1"; 
+const DEFAULT_MONTHLY_CLIP_TARGET = 90;
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDqum6bGwLqjInO04PCxuDV8pEl5UbwphI",
-  authDomain: "peem6pack-command.firebaseapp.com",
-  projectId: "peem6pack-command",
-  storageBucket: "peem6pack-command.firebasestorage.app",
-  messagingSenderId: "843579566868",
-  appId: "1:843579566868:web:1daa7700dab2739b757001"
+  apiKey: "AIzaSyA1...", // 🔴 ใส่ Config ของพี่ตรงนี้
+  authDomain: "your-app.firebaseapp.com",
+  projectId: "your-app",
+  storageBucket: "your-app.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:12345:web:abcd"
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const APP_ID = 'peem6pack-command-v1';
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+const auth = getAuth(firebaseApp);
 
-const TARGET_ANGLES = 7; 
-const RESCORE_DAYS = 7; 
-const PICK_THRESHOLD = 83; 
-const WAIT_THRESHOLD = 55; 
-const ARGOON_MAX = 18; 
-const ARGOON_PASS = 15; 
-const ARGOON_WATCH = 10; 
-const WINNER_GMV = 1000; 
-const CONCENTRATION_LIMIT = 60; 
-const REPOST_INTERVALS = [7, 14, 30]; 
-const PORTFOLIO_TARGET = { A: 60, B: 25, C: 10, D: 5 }; 
-const BLENDED_COMMISSION_TARGET = 15; 
-const DEFAULT_MONTHLY_CLIP_TARGET = 150;
-const MONTHLY_REVENUE_TARGET = 300000; 
-
-const DEFAULT_PILLARS = [
-  { id: 'P1', name: 'Supplement Education', emoji: '📚', desc: 'สอนเลือกอาหารเสริม' },
-  { id: 'P2', name: 'Mistake / Buyer Beware', emoji: '⚠️', desc: 'ซื้อผิด กินผิด' },
-  { id: 'P3', name: 'Routine / Use Case', emoji: '☀️', desc: 'กินยังไงในชีวิตจริง' },
-  { id: 'P4', name: 'Product Review / Comparison', emoji: '🔍', desc: 'รีวิวและเทียบสินค้า' },
-  { id: 'P5', name: 'Fitness Lifestyle', emoji: '💪', desc: 'หุ่นดีจริง ใช้จริง' },
-];
-
-const ABCD_INFO = {
-  A: { label: 'A — ขายดี', short: 'A', desc: 'สินค้าขายดี', bg: 'bg-[#0f5144]', text: 'text-[#0f5144]', border: 'border-[#0f5144]/10', lightBg: 'bg-emerald-50/50' },
-  B: { label: 'B — มาใหม่', short: 'B', desc: 'สินค้าแนะนำ/กำลังมาแรง', bg: 'bg-[#2563eb]', text: 'text-[#2563eb]', border: 'border-blue-100', lightBg: 'bg-blue-50/50' },
-  C: { label: 'C — ประหยัด', short: 'C', desc: 'สินค้าราคาจับต้องง่าย', bg: 'bg-[#d97706]', text: 'text-[#d97706]', border: 'border-amber-100', lightBg: 'bg-amber-50/50' },
-  D: { label: 'D — คอมสูง', short: 'D', desc: 'สินค้าไฮเอนด์ค่าคอมหนา', bg: 'bg-[#7c3aed]', text: 'text-[#7c3aed]', border: 'border-purple-100', lightBg: 'bg-purple-50/50' },
-  V: { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50/50' },
-};
-
-const DECISION_INFO = { PICK: { label: 'PICK', bg: 'bg-[#e2f7e4]', text: 'text-[#1d7c2a]' }, WAIT: { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' }, DROP: { label: 'DROP', bg: 'bg-[#fee2e2]', text: 'text-[#dc2626]' } };
-const PRODUCT_TYPES = [{ id: 'supplement', label: 'อาหารเสริม', emoji: '💊' }, { id: 'shoes', label: 'รองเท้ากีฬา', emoji: '👟' }, { id: 'equipment', label: 'อุปกรณ์ฟิตเนส', emoji: '🏋️' }, { id: 'apparel', label: 'ชุดออกกำลังกาย', emoji: '👕' }, { id: 'other', label: 'อื่นๆ', emoji: '📦' }];
-const SPLITTER_OPTIONS = { persona: ['คนอ้วน', 'ผู้หญิง', 'มือใหม่', 'พนักงานออฟฟิศ', 'คนแก่/วัยกลางคน', 'คนเดินเยอะ', 'นักวิ่ง', 'คนลดน้ำหนัก', 'คนเล่นเวท'], situation: ['เดินห้าง', 'วิ่งลู่', 'เดินงาน', 'เที่ยว', 'คาร์ดิโอ', 'เข้ายิม', 'เดินสวน', 'ทำงานออฟฟิศ', 'ก่อนนอน', 'หลังตื่นนอน'], emotion: ['กลัวเจ็บ', 'ขี้เกียจเพราะเจ็บ', 'อยากเริ่มใหม่', 'อยากผอม', 'เหนื่อยจากงาน', 'อยากดูดี', 'อยากแข็งแรง', 'หมดหวังกับร่างกาย'], format: ['POV', 'Story', 'Talking Head', 'Review', 'Compare', 'Voice Over', 'How-to', 'Listicle', 'Before/After'] };
-const PAIN_SOURCES = [{ id: 'shopee', label: '💬 Shopee/Lazada' }, { id: 'tiktok', label: '🔍 TikTok "แต่..."' }, { id: 'pantip', label: '💭 Pantip/Groups' }, { id: 'ai', label: '🤖 AI Persona Simulation' }, { id: 'personal', label: '👤 ประสบการณ์ตรง' }];
-const CLIP_LEVELS = [{ id: 'traffic', label: 'Traffic', color: 'bg-sky-500' }, { id: 'consideration', label: 'Consideration', color: 'bg-[#7c3aed]' }, { id: 'conversion', label: 'Conversion', color: 'bg-[#f43f5e]' }];
-
-// ============================================================================
-// [ZONE 2] CORE CALCULATIONS & DATA FORMATTERS
-// ============================================================================
-const uid = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-const todayStr = () => new Date().toISOString().slice(0, 10);
-const currentMonth = () => new Date().toISOString().slice(0, 7);
-const daysSince = (iso) => !iso ? 999 : Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-const fmtDate = (iso) => { if (!iso) return '-'; const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}/${(d.getFullYear() + 543).toString().slice(2)}`; };
-const fmtNum = (n) => (n ?? 0).toLocaleString('th-TH');
-const truncate = (s, n) => !s ? '' : s.length > n ? s.slice(0, n) + '…' : s;
-const hoursSince = (iso) => !iso ? 999 : (Date.now() - new Date(iso).getTime()) / 3600000;
-
-const getAbcdInfo = (cat) => ABCD_INFO[cat] || ABCD_INFO['V'] || { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50/50' };
-const getDecisionInfo = (dec) => DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
-const getProductTypeInfo = (typeId) => PRODUCT_TYPES.find(t => t.id === typeId) || { id: 'other', label: 'อื่นๆ', emoji: '📦' };
-
-function getStatsPending(clips) { 
-  const pending24h = [], pending7d = []; 
-  if (!Array.isArray(clips)) return { pending24h, pending7d };
-  clips.forEach(c => { 
-    const hrs = hoursSince(c.postedAt); 
-    if (hrs >= 22 && (c.views24h === null || c.views24h === undefined || c.views24h === '')) pending24h.push(c); 
-    if (hrs >= 156 && (c.views7d === null || c.views7d === undefined || c.views7d === '')) pending7d.push(c); 
-  }); 
-  return { pending24h, pending7d }; 
-}
-
-function calcScore(sc = {}) { 
-  let total = 0, max = 18; // 👈 บังคับฐานคะแนนเต็มที่ 18 เสมอ!
-  const cv = (v) => v === '' || v === null || v === undefined ? null : Number(v); 
-  
-  const commission = cv(sc.commission); 
-  if (commission !== null && !isNaN(commission)) { total += commission >= 20 ? 3 : commission >= 15 ? 2 : commission >= 10 ? 1 : 0; } 
-  
-  const g7 = cv(sc.gmv7dPct), g30 = cv(sc.gmv30dPct); 
-  if (g7 !== null && g30 !== null && !isNaN(g7) && !isNaN(g30)) { if (g7 > 0 && g30 > 0) total += 3; else if (g7 < 0 && g30 < 0) total += 1; else total += 2; } 
-  else if (g7 !== null && !isNaN(g7)) { total += g7 > 0 ? 2 : 1; } 
-  else if (g30 !== null && !isNaN(g30)) { total += g30 > 0 ? 2 : 1; } 
-  
-  const creators = cv(sc.creatorCount); 
-  if (creators !== null && !isNaN(creators)) { total += creators <= 500 ? 3 : creators <= 1000 ? 2 : 1; } 
-  
-  const angles = cv(sc.anglesCount); 
-  if (angles !== null && !isNaN(angles)) { total += angles >= 3 ? 3 : angles >= 2 ? 2 : 1; } 
-  
-  const cr = cv(sc.crPct); 
-  if (cr !== null && !isNaN(cr)) { total += cr >= 20 ? 3 : cr >= 10 ? 2 : 1; } 
-  
-  const conc = cv(sc.concentration); 
-  if (conc !== null && !isNaN(conc)) { total += conc < 30 ? 3 : conc <= 60 ? 2 : 1; } 
-  
-  return { total, max, pct: Math.round((total / max) * 100) }; 
-}
-
-function getDecision(pct) { return pct >= PICK_THRESHOLD ? 'PICK' : pct >= WAIT_THRESHOLD ? 'WAIT' : 'DROP'; }
-
-function autoClassify({ gmv30d, commission, tiktokRank, price }) { 
-  const g = Number(gmv30d) || 0; const c = Number(commission) || 0; const rank = Number(tiktokRank) || 0; const pr = Number(price) || 0; 
-  if (g >= 30000) { if (c >= 15) return { cat: 'A', label: 'A — ideal', reason: 'Mass + คอมดี = A ideal', confidence: 'high' }; return { cat: 'A', label: 'A (proven exception)', reason: 'Mass = ฐานรายได้แม้คอมต่ำ', confidence: 'high' }; } 
-  if (g >= 10000) { if (pr > 0 && pr < 500 && c < 20) return { cat: 'C', label: 'C (low-price + mass)', reason: `ราคา ฿${pr} + GMV ฿${fmtNum(g)} = mass low-ticket → C traffic driver`, confidence: 'medium' }; if (c >= 20) return { cat: 'B', label: 'B → A potential', reason: 'กำลังพิสูจน์ตัว ใกล้ E', confidence: 'medium' }; return { cat: 'B', label: 'B', reason: 'Volume ปานกลาง — เทสต่อ', confidence: 'medium' }; } 
-  if (g >= 1000) { if (pr >= 800 && c >= 20) return { cat: 'D', label: 'D (premium)', reason: `ราคา ฿${pr} + คอม ${c}% — กินกำไรเป็นรอบ ห้าม auto-promote A`, confidence: 'medium' }; if (pr > 0 && pr < 500) return { cat: 'C', label: 'C (low-price, low-vol)', reason: `ราคา ฿${pr} — traffic driver / repeat buy`, confidence: 'low' }; if (c >= 20) return { cat: 'D', label: 'D', reason: 'คอมสูงแต่ volume ไม่ถึง mass — D ตามนิยาม', confidence: 'medium' }; if (c >= 10) return { cat: 'C', label: 'C', reason: 'Volume น้อย คอมปานกลาง — ดู price/repeat-buy', confidence: 'low' }; return { cat: 'C', label: 'C / Cut', reason: 'Volume + คอมต่ำ — พิจารณาตัด', confidence: 'low' }; } 
-  if (rank >= 1 && rank <= 5) return { cat: 'B', label: 'B (Top 1-5 untested)', reason: 'Mass ใน TikTok แต่ยังไม่เทสในช่อง', confidence: 'medium' }; 
-  if (rank >= 6 && rank <= 20) return { cat: 'B', label: 'B (Top 10-20)', reason: 'Demand ปานกลาง — testing zone', confidence: 'medium' }; 
-  if (rank > 20) return { cat: 'B', label: 'B (weak signal)', reason: 'อันดับต่ำ — เทสด่วน หรือ skip', confidence: 'low' }; 
-  return { cat: 'B', label: 'B (ใหม่)', reason: 'ยังไม่มี data — เริ่มเทส', confidence: 'low' }; 
-}
-
-function getPortfolioBalance(products, clips, timeframe = 30) { const byCat = { A: 0, B: 0, C: 0, D: 0 }; let total = 0; if (!Array.isArray(products)) return null; products.forEach(p => { if (!['A', 'B', 'C', 'D'].includes(p.category)) return; const sales = getProductSales(p, clips, timeframe); byCat[p.category] += sales.primary; total += sales.primary; }); if (total === 0) return null; return Object.fromEntries(Object.entries(byCat).map(([k, v]) => { const actual = Math.round((v / total) * 100); const target = PORTFOLIO_TARGET[k]; const diff = actual - target; return [k, { actual, target, diff, gmv: v, status: Math.abs(diff) <= 5 ? 'ok' : diff > 0 ? 'over' : 'under' }]; })); }
-function getBlendedCommission(products, clips, timeframe = 30) { let weightedSum = 0, totalGMV = 0; const breakdown = []; if (!Array.isArray(products)) return null; products.forEach(p => { const sales = getProductSales(p, clips, timeframe); const c = Number(p.scorecard?.commission) || 0; if (sales.primary > 0 && c > 0) { weightedSum += sales.primary * c; totalGMV += sales.primary; breakdown.push({ product: p, gmv: sales.primary, commission: c, contribution: sales.primary * c }); } }); if (totalGMV === 0) return null; return { blended: Math.round((weightedSum / totalGMV) * 100) / 100, target: BLENDED_COMMISSION_TARGET, totalGMV, breakdown }; }
-function getCategoryStack(products, clips, category) { if (!Array.isArray(products)) return []; const catProducts = products.filter(p => p.category === category); const withData = catProducts.map(p => { const sales30d = getProductSales(p, clips, 30).primary; const sales7d = getProductSales(p, clips, 7).primary; const momentum = (sales30d / 30) > 0 ? (sales7d / 7) / (sales30d / 30) : 1; const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonth()).length; return { product: p, sales30d, sales7d, momentum, clipsThisMonth }; }).sort((a, b) => b.sales30d - a.sales30d); return withData.map((s, i) => { let tier, frequency, targetMonth; if (i < 2) { tier = 'HOT'; frequency = '3-4 คลิป/wk'; targetMonth = 14; } else if (i < 4) { tier = 'STEADY'; frequency = '1-2 คลิป/wk'; targetMonth = 6; } else { tier = 'PASSIVE'; frequency = '2-3 คลิป/เดือน'; targetMonth = 2.5; } const atRisk = s.momentum > 0 && s.momentum < 0.8; return { ...s, rank: i + 1, tier, frequency, targetMonth, atRisk }; }); }
-function getECandidates(products, clips, timeframe = 30) { if (!Array.isArray(products)) return []; return products.map(p => { if (p.category === 'A') return null; if (daysSince(p.createdAt) < 14) return null; const sales30d = getProductSales(p, clips, timeframe).primary; const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length; const rank = Number(p.tiktokRank) || 0; const commission = Number(p.scorecard?.commission || 0); let eScore = 0; const reasons = []; if (sales30d >= 30000) { eScore += 2; reasons.push(`GMV ฿${fmtNum(sales30d)} (mass)`); } else if (sales30d >= 10000) { eScore += 1; reasons.push(`GMV ฿${fmtNum(sales30d)}`); } if (winnerCount >= 2) { eScore += 2; reasons.push(`${winnerCount} winner clips`); } else if (winnerCount === 1) { eScore += 1; reasons.push('1 winner clip'); } if (rank > 0 && rank <= 10) { eScore += 1; reasons.push(`Top #${rank} ตลาด`); } if (commission >= 15) { eScore += 1; reasons.push(`คอม ${commission}% ดี`); } if (p.isShopAds) { eScore += 1; reasons.push('Shop Ads 🛒'); } if (eScore < 2) return null; let confidence, advice; if (eScore >= 5) { confidence = 'high'; advice = 'ย้ายเป็น A เพื่อขยี้คอนเทนต์'; } else if (eScore >= 3) { confidence = 'medium'; advice = 'พิจารณาย้าย / เทสต่อ 1-2 wk'; } else { confidence = 'low'; advice = 'มี signal เริ่มต้น — เทสต่อ'; } return { product: p, eScore, confidence, reasons, sales30d, winnerCount, advice }; }).filter(Boolean).sort((a, b) => b.eScore - a.eScore); }
-function getROIAnalysis(products, clips, monthlyTargetGMV, timeframe = 30) { if (!Array.isArray(products)) return { items: [], totalCommRevenue: 0, gap: monthlyTargetGMV, pct: 0 }; const items = products.map(p => { const sales = getProductSales(p, clips, timeframe); const sales30d = sales.primary; const commission = Number(p.scorecard?.commission || 0); const price = Number(p.price) || 0; const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0; const currentCommRevenue = sales30d * commission / 100; const ordersNeededAlone = commPerOrder > 0 ? Math.ceil(monthlyTargetGMV / commPerOrder) : null; return { product: p, sales30d, commission, price, commPerOrder, currentCommRevenue, ordersNeededAlone }; }).filter(i => i.sales30d > 0 || i.commPerOrder > 0).sort((a, b) => b.currentCommRevenue - a.currentCommRevenue); const totalCommRevenue = items.reduce((s, i) => s + i.currentCommRevenue, 0); return { items, totalCommRevenue, gap: Math.max(0, monthlyTargetGMV - totalCommRevenue), pct: monthlyTargetGMV > 0 ? Math.round((totalCommRevenue / monthlyTargetGMV) * 100) : 0 }; }
-function getProductsToCut(products, clips, timeframe = 30) { if (!Array.isArray(products)) return []; return products.map(p => { const reasons = []; const commission = Number(p.scorecard?.commission || 0); const sales = getProductSales(p, clips, timeframe); if (commission > 0 && commission <= 5 && sales.primary < 30000) reasons.push(`คอม ${commission}% ≤5%`); if (p.scorePct && p.maxScore >= 12 && p.scorePct < WAIT_THRESHOLD) reasons.push(`Argoon ${p.score}/${p.maxScore} = CUT`); const g7 = Number(p.scorecard?.gmv7dPct); const g30 = Number(p.scorecard?.gmv30dPct); if (!isNaN(g7) && !isNaN(g30) && g7 < -20 && g30 < -20) reasons.push(`GMV ตกหนัก ${g7}% / ${g30}%`); if (daysSince(p.createdAt) >= 14 && sales.primary === 0 && sales.clipCount === 0) reasons.push('ไม่มีกิจกรรม 30d'); if (reasons.length === 0) return null; return { product: p, reasons, severity: reasons.length }; }).filter(Boolean).sort((a, b) => b.severity - a.severity); }
-
-function getProductSales(product, clips, timeframe) { 
-  if (!product) return { fromClips: 0, fromManual: 0, hasManual: false, clipCount: 0, primary: 0 }; 
-  let fromClips = 0, clipCount = 0, fromManual = 0; 
-  if (typeof timeframe === 'string' && timeframe.includes('-')) { 
-    const pclips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && c.postedAt?.slice(0, 7) === timeframe) : []; 
-    fromClips = pclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); 
-    clipCount = pclips.length; 
-    fromManual = Number(product.salesData?.monthly?.[timeframe]) || 0; 
-  } else { 
-    const days = Number(timeframe) || 30; 
-    const cutoff = Date.now() - days * 86400000; 
-    const pclips = Array.isArray(clips) ? clips.filter(c => c.productId === product.id && new Date(c.postedAt).getTime() >= cutoff) : []; 
-    fromClips = pclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); 
-    clipCount = pclips.length; 
-    fromManual = days <= 7 ? (Number(product.salesData?.last7d) || 0) : (Number(product.salesData?.last30d) || 0); 
-  } 
-  return { fromClips, fromManual, hasManual: fromManual > 0, clipCount, primary: Math.max(fromManual, fromClips) }; 
-}
-
-function getBestAngle(product, clips) { if (!product?.angles?.length || !Array.isArray(clips)) return null; const stats = product.angles.map(angle => { const aclips = clips.filter(c => c.angleId === angle.id); const totalGMV = aclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0); return { angle, count: aclips.length, totalGMV, avg: aclips.length > 0 ? totalGMV / aclips.length : 0 }; }).filter(s => s.count >= 1).sort((a, b) => b.avg - a.avg); return stats[0] || null; }
-function getWinners(clips, products) { if (!Array.isArray(clips)) return []; return clips.filter(c => (Number(c.gmv) || 0) >= WINNER_GMV).map(c => ({ clip: c, product: Array.isArray(products) ? products.find(p => p.id === c.productId) : null, daysOld: daysSince(c.postedAt) })).sort((a, b) => (Number(b.clip.gmv) || 0) - (Number(a.clip.gmv) || 0)); }
-function getRepostCandidates(clips, products) { return getWinners(clips, products).map(w => { const rs = w.clip.repostStatus || {}; let bucket = null; if (w.daysOld >= 30 && !rs.d30) bucket = 30; else if (w.daysOld >= 14 && !rs.d14) bucket = 14; else if (w.daysOld >= 7 && !rs.d7) bucket = 7; return bucket ? { ...w, repostBucket: bucket } : null; }).filter(Boolean).sort((a, b) => b.repostBucket - a.repostBucket); }
-function getConcentration(clips, products, timeframe = 30) { const byProduct = {}; if (!Array.isArray(products)) return null; products.forEach(p => { const s = getProductSales(p, clips, timeframe); if (s.primary > 0) byProduct[p.id] = s.primary; }); const totalGMV = Object.values(byProduct).reduce((s, v) => s + v, 0); if (totalGMV === 0) return null; const sorted = Object.entries(byProduct).sort((a, b) => b[1] - a[1]); if (!sorted || sorted.length === 0) return null; return { pct: Math.round((sorted[0][1] / totalGMV) * 100), product: products.find(p => p.id === sorted[0][0]), totalGMV }; }
-
-function getMonthlyGMV(products, clips, ymKey) {
-  let manualTotal = 0;
-  if (Array.isArray(products)) products.forEach(p => { manualTotal += (Number(p.salesData?.monthly?.[ymKey]) || 0); });
-  const mclips = Array.isArray(clips) ? clips.filter(c => c.postedAt?.startsWith(ymKey)) : [];
-  const vClipGmv = mclips.filter(c => c.isV).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
-  const clipGmv = mclips.reduce((s, c) => s + (Number(c.gmv) || 0), 0);
-  return manualTotal > 0 ? manualTotal + vClipGmv : clipGmv;
-}
-
-function getAllTimeProductGMV(p, clips) { 
-  let total = 0; 
-  const ledger = p.salesData?.monthly || {}; 
-  const clipMonthly = {}; 
-  if (Array.isArray(clips)) { 
-    clips.filter(c => c.productId === p.id).forEach(c => { 
-      const ym = c.postedAt?.slice(0, 7); 
-      if (ym) clipMonthly[ym] = (clipMonthly[ym] || 0) + (Number(c.gmv) || 0); 
-    }); 
-  } 
-  const allMonths = new Set([...Object.keys(ledger), ...Object.keys(clipMonthly)]); 
-  allMonths.forEach(ym => { 
-    const mVal = Number(ledger[ym]) || 0; 
-    const cVal = Number(clipMonthly[ym]) || 0; 
-    total += Math.max(mVal, cVal); 
-  }); 
-  const active30d = Number(p.salesData?.last30d) || 0; 
-  return Math.max(total, active30d); 
-}
-
-function migrateProduct(p) { if (!p) return p; const sc = p.scorecard || {}; if (sc.gmv7d !== undefined && sc.gmv7dPct === undefined) { const { gmv7d, gmv30d, ...rest } = sc; p.scorecard = rest; const s = calcScore(p.scorecard); p.score = s.total; p.maxScore = s.max; p.scorePct = s.pct; p.decision = getDecision(s.pct); } return p; }
-function migrateClip(c) { if (!c) return c; if (c.views !== undefined && c.views7d === undefined) { c.views7d = c.views; delete c.views; } if (c.link !== undefined && c.videoLink === undefined) { c.videoLink = c.link; delete c.link; } return c; }
-
-// ============================================================================
-// [ZONE 3] MAIN APPLICATION & CLOUD LIFECYCLE (Pharmly Architecture)
-// ============================================================================
 export default function App() {
+  // --- STATES ---
   const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [dbInitialized, setDbInitialized] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [page, setPage] = useState('home');
-  const [selectedProductId, setSelectedProductId] = useState(null);
   
+  // App Data States
   const [products, setProducts] = useState([]);
   const [clips, setClips] = useState([]);
-  const [appSettings, setAppSettings] = useState({ monthlyTarget: DEFAULT_MONTHLY_CLIP_TARGET, noticeBoard: '', monthlyRevenueTarget: 300000 });
-  const [showImportSuccess, setShowImportSuccess] = useState(false);
-  const [importStats, setImportStats] = useState({ products: 0, clips: 0 });
-  
-  const [toast, setToast] = useState(null);
-  const [showAddProduct, setShowAddProduct] = useState(false);
-  const [editScoreProductId, setEditScoreProductId] = useState(null);
-  const [editProductInfoId, setEditProductInfoId] = useState(null);
-  const [showAddPain, setShowAddPain] = useState(false);
-  const [showAddAngle, setShowAddAngle] = useState(false);
-  const [showLockProduct, setShowLockProduct] = useState(false);
-  const [showAddClip, setShowAddClip] = useState(false);
-  const [editClipId, setEditClipId] = useState(null);
-  const [clipForVOnly, setClipForVOnly] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  
-  const [showRadarModal, setShowRadarModal] = useState(false);
+  const [appSettings, setAppSettings] = useState({
+    monthlyTarget: DEFAULT_MONTHLY_CLIP_TARGET,
+    monthlyRevenueTarget: 300000, // เป้าหมาย 3 แสนบาทต่อเดือน
+    noticeBoard: ""
+  });
 
-  const [confirmDeleteProdId, setConfirmDeleteProdId] = useState(null);
-  const [confirmDeleteClipId, setConfirmDeleteClipId] = useState(null);
-  const [confirmClearDb, setConfirmClearDb] = useState(false);
-  const [makeSimilarClip, setMakeSimilarClip] = useState(null);
-  const [showBackup, setShowBackup] = useState(false);
-  const [showGateWarning, setShowGateWarning] = useState(null); 
+  // UI Toast State
+  const [toast, setToast] = useState({ show: false, msg: "", type: "info" });
 
-  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
+  const showToast = (msg, type = "info") => {
+    setToast({ show: true, msg, type });
+    setTimeout(() => setToast({ show: false, msg: "", type: "info" }), 3000);
+  };
 
+  // --- 1. TRACK AUTH STATE ---
   useEffect(() => {
-    signInAnonymously(auth).catch(err => showToast("เชื่อมคลาวด์ล้มเหลว", "error"));
-    return onAuthStateChanged(auth, setUser);
+    const unsubAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+      if (currentUser) {
+        setDbInitialized(true);
+      }
+    });
+    return () => unsubAuth();
   }, []);
 
+  // --- 2. SYNC REALTIME DATA ---
   useEffect(() => {
     if (!user) return;
     setIsSyncing(true);
 
+    // Sync Settings
     const settingsRef = doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings');
     const unsubSettings = onSnapshot(settingsRef, (snap) => {
       if (snap.exists()) {
-        setAppSettings({
+        setAppSettings(prev => ({
+          ...prev,
           monthlyTarget: snap.data().monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET,
           noticeBoard: snap.data().noticeBoard || ''
-        });
+        }));
       }
     });
 
+    // Sync Products
     const prodColRef = collection(db, 'artifacts', APP_ID, 'users', user.uid, 'products');
     const unsubProducts = onSnapshot(prodColRef, (snap) => {
-      const prodList = []; snap.forEach(d => prodList.push({ id: d.id, ...d.data() }));
+      const prodList = [];
+      snap.forEach(d => prodList.push({ id: d.id, ...d.data() }));
       setProducts(prodList);
-      setDbInitialized(true);
+      setIsSyncing(false);
+    }, (err) => {
+      console.error(err);
       setIsSyncing(false);
     });
 
+    // Sync Clips
     const clipColRef = collection(db, 'artifacts', APP_ID, 'users', user.uid, 'clips');
     const unsubClips = onSnapshot(clipColRef, (snap) => {
-      const clipList = []; snap.forEach(d => clipList.push({ id: d.id, ...d.data() }));
+      const clipList = [];
+      snap.forEach(d => clipList.push({ id: d.id, ...d.data() }));
       setClips(clipList);
     });
 
     return () => { unsubSettings(); unsubProducts(); unsubClips(); };
   }, [user]);
 
-  const sanitizeForFirestore = (obj) => {
-    if (obj === undefined) return null;
-    if (obj === null) return null;
-    if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
-    if (typeof obj === 'object') {
-      const cleaned = {};
-      for (const [k, v] of Object.entries(obj)) {
-        if (v !== undefined) cleaned[k] = sanitizeForFirestore(v);
-      }
-      return cleaned;
+  // --- HANDLERS ---
+  const handleLogin = async () => {
+    setIsLoggingIn(true);
+    try {
+      await signInAnonymously(auth);
+      showToast("เข้าสู่ระบบสำเร็จ SYSTEM ONLINE", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("เชื่อมต่อฐานข้อมูลล้มเหลว", "error");
+    } finally {
+      setIsLoggingIn(false);
     }
-    return obj;
   };
 
-  const updateSettingsInCloud = async (patch) => {
-    setAppSettings(prev => ({ ...prev, ...patch }));
-    await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings'), patch, { merge: true });
-  };
-
-  const updateProductInCloud = async (id, data) => {
-    if (!user) return;
-    await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', id), sanitizeForFirestore(data), { merge: true });
-  };
-
-  const addProduct = async (data) => {
-    const id = uid(); const s = calcScore(data.scorecard);
-    const newP = { id, ...data, score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct), pillars: data.pillars || [], pains: [], angles: [], lastScoredAt: new Date().toISOString(), createdAt: new Date().toISOString(), locked: null };
-    await updateProductInCloud(id, newP);
-    showToast('เพิ่มสินค้าใหม่แล้ว!');
-  };
-
-  const updateProductScore = async (id, sc) => {
-    const s = calcScore(sc);
-    await updateProductInCloud(id, { scorecard: sc, score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct), lastScoredAt: new Date().toISOString() });
-    showToast('คัดกรองคะแนนใหม่สำเร็จ!');
-  };
-
-  const executeDeleteProduct = async (id) => {
-    await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', id));
-    const relatedClips = clips.filter(c => c.productId === id);
-    for (const c of relatedClips) {
-      await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id));
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setDbInitialized(false);
+      setProducts([]);
+      setClips([]);
+      showToast("ออกจากระบบ SYSTEM OFFLINE", "info");
+    } catch (err) {
+      showToast("เกิดข้อผิดพลาดในการ Logout", "error");
     }
-    setPage('products'); 
-    setConfirmDeleteProdId(null);
-    showToast(`ลบสินค้าและคลิป (${relatedClips.length}) ถาวรเรียบร้อย`);
   };
 
-  const executeDeleteClip = async (id) => {
-    await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', id));
-    setConfirmDeleteClipId(null);
-    showToast('ลบคลิปถาวรแล้ว');
-  };
-
-  const executeClearDatabase = async () => {
-    for (const p of products) await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', p.id));
-    for (const c of clips) await deleteDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id));
-    setConfirmClearDb(false);
-    setShowSettings(false); 
-    showToast('เคลียร์คลาวด์หมดจดแล้ว');
-  };
-
-  const addClip = async (data) => {
-    if (!user) return; const id = uid();
-    await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', id), sanitizeForFirestore({ id, ...data, postedAt: data.postedAt || new Date().toISOString(), createdAt: new Date().toISOString() }));
-    showToast('บันทึกคลิปลงคลังสำเร็จ!');
-  };
-
-  const updateClip = async (id, patch) => {
-    if (!user) return;
-    await updateDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', id), sanitizeForFirestore(patch));
-    showToast('อัพเดทคลิปแล้ว!');
-  };
-
-  const markRepostDone = async (clipId, bucket) => {
-    const clip = clips.find(c => c.id === clipId); if (!clip) return;
-    const rs = { ...(clip.repostStatus || {}) }; const key = `d${bucket}`;
-    rs[key] = rs[key] ? null : new Date().toISOString();
-    await updateClip(clipId, { repostStatus: rs });
-  };
-
-  const importData = (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (data.products && data.clips) {
-           showToast('กำลังซิงค์ไฟล์ข้อมูลขึ้น Cloud...', 'success');
-           const newP = data.products.map(migrateProduct);
-           const newC = data.clips.map(migrateClip);
-           for (const p of newP) await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'products', p.id), sanitizeForFirestore(p));
-           for (const c of newC) await setDoc(doc(db, 'artifacts', APP_ID, 'users', user.uid, 'clips', c.id), sanitizeForFirestore(c));
-           
-           setImportStats({ products: newP.length, clips: newC.length });
-           setShowImportSuccess(true);
-           if (showSettings) setShowSettings(false); 
-        }
-      } catch { showToast('ไฟล์ JSON ผิดพลาด', 'error'); }
-    };
-    reader.readAsText(file);
-    e.target.value = null; 
-  };
-
-  const selectedProduct = selectedProductId ? products.find(p => p.id === selectedProductId) : null;
-  const lockedProducts = useMemo(() => products.filter(p => p.locked && p.locked.month === currentMonth()), [products]);
-  const productsNeedingRescore = useMemo(() => products.filter(p => !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS), [products]);
-  const last7DaysClips = useMemo(() => {
-    const cutoff = Date.now() - 7 * 86400000;
-    return clips.filter(c => new Date(c.postedAt).getTime() >= cutoff).sort((a, b) => new Date(a.postedAt) - new Date(b.postedAt));
-  }, [clips]);
-
-  if (!dbInitialized) {
+  // --- RENDER 1: LOADING STATE ---
+  if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#061b17] flex flex-col items-center justify-center space-y-4">
-        <div className="w-14 h-14 border-4 border-emerald-950 border-t-lime-300 rounded-full animate-spin"></div>
-        <div className="font-semibold text-emerald-100 tracking-wider text-sm animate-pulse">PEEM6PACK COMMAND CENTER INITIALIZING...</div>
+      <div className="min-h-screen bg-[#0d0f12] flex flex-col items-center justify-center font-sans">
+        <div className="w-12 h-12 border-4 border-[#ff6600] border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-[#a0aec0] text-sm tracking-widest font-mono">LOADING SECURITY PROTOCOLS...</p>
       </div>
     );
   }
 
+  // --- RENDER 2: LOGIN PAGE (โทนเดิม ส้ม-ดำ ดุดัน) ---
+  if (!user || !dbInitialized) {
+    return (
+      <div className="min-h-screen bg-[#0d0f12] flex items-center justify-center p-4 font-sans relative overflow-hidden">
+        {/* Ambient Glow Background */}
+        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-[#ff6600] opacity-5 rounded-full blur-[120px] pointer-events-none"></div>
+        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-[#ff6600] opacity-5 rounded-full blur-[120px] pointer-events-none"></div>
+
+        {/* Login Box */}
+        <div className="w-full max-w-md bg-[#14181f] border border-[#222936] rounded-2xl p-8 shadow-2xl relative z-10 text-center">
+          
+          {/* Logo / Title */}
+          <div className="mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#ff6600] to-[#ff8533] text-white font-black text-2xl shadow-[0_0_20px_rgba(255,102,0,0.3)] mb-4">
+              P6
+            </div>
+            <h1 className="text-2xl font-black text-white tracking-tight uppercase">
+              Peem6pack
+            </h1>
+            <p className="text-xs text-[#ff6600] font-mono tracking-widest uppercase mt-1">
+              Command Center v1.0
+            </p>
+          </div>
+
+          {/* System Status Mock */}
+          <div className="bg-[#1c232e] border border-[#2d3748] rounded-xl p-4 text-left mb-8 font-mono text-xs text-[#a0aec0] space-y-1">
+            <p><span className="text-[#ff6600]">▶ HOST:</span> secure_cloud_v1</p>
+            <p><span className="text-[#ff6600]">▶ STATUS:</span> READY TO CONNECT</p>
+            <p><span className="text-[#4caf50]">▶ CORE_TARGET:</span> 300K_REV / 90_CLIPS</p>
+          </div>
+
+          {/* Action Button */}
+          <button
+            onClick={handleLogin}
+            disabled={isLoggingIn}
+            className="w-full py-4 px-6 rounded-xl font-bold text-white bg-gradient-to-r from-[#e65c00] to-[#ff6600] hover:from-[#ff6600] hover:to-[#ff8533] active:scale-[0.99] transition-all disabled:opacity-50 shadow-[0_4px_15px_rgba(255,102,0,0.2)] hover:shadow-[0_4px_25px_rgba(255,102,0,0.4)] flex items-center justify-center gap-3 group"
+          >
+            {isLoggingIn ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>INITIALIZING SYSTEM...</span>
+              </>
+            ) : (
+              <>
+                <span className="tracking-wider uppercase">Enter Command Center</span>
+                <span className="group-hover:translate-x-1 transition-transform">→</span>
+              </>
+            )}
+          </button>
+
+          <p className="text-[11px] text-[#4a5568] font-mono mt-6">
+            RESTRICTED ACCESS // AUTHORIZED PERSONNEL ONLY
+          </p>
+        </div>
+
+        {/* Global Toast Inside Login Screen */}
+        {toast.show && (
+          <div className="absolute bottom-5 right-5 z-50 bg-[#1c232e] border-l-4 border-[#ff6600] text-white px-5 py-3 rounded shadow-xl font-mono text-sm animate-fade-in flex items-center gap-2">
+            <span className="text-[#ff6600]">●</span> {toast.msg}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // --- RENDER 3: MAIN APP (หลังล็อกอินสำเร็จ) ---
   return (
-    <div className="min-h-screen bg-[#f3f6f5] text-[#0d2a23] flex flex-col lg:flex-row" style={{ fontFamily: "'Inter', 'Noto Sans Thai', sans-serif" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap');
-        .font-display { font-family: 'Inter', 'Noto Sans Thai', sans-serif; font-weight: 700; }
-        .striped-bar { background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 75%, transparent 75%, transparent); background-size: 1rem 1rem; }
-      `}</style>
-
-      {/* SIDEBAR */}
-      <aside className="w-full lg:w-72 bg-[#012b25] text-white flex flex-col justify-between flex-shrink-0 shadow-2xl relative z-20">
-        <div>
-          <div className="p-7 flex items-center justify-between border-b border-[#053d34]">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-[#d9eb54] text-[#012b25] rounded-xl flex items-center justify-center font-extrabold text-xl shadow-lg">P6</div>
-              <div><h2 className="font-display text-lg leading-none tracking-tight">Pharmly</h2><span className="text-[11px] text-emerald-400/80 font-medium tracking-wide">Affiliate Platform</span></div>
-            </div>
-            {isSyncing ? <CloudOff className="w-4 h-4 text-amber-400 animate-pulse" /> : <Cloud className="w-4 h-4 text-emerald-400" />}
-          </div>
-          <nav className="p-5 space-y-1.5">
-            {[
-              { id: 'home', label: 'Overview', icon: Home },
-              { id: 'products', label: 'Products', icon: Package },
-              { id: 'lock', label: 'Lock Focus', icon: Lock },
-              { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-              { id: 'log', label: 'Clip Logs', icon: Database }
-            ].map(item => {
-              const Icon = item.icon; const active = page === item.id;
-              return (
-                <button key={item.id} onClick={() => setPage(item.id)} className={`w-full flex items-center gap-3.5 px-5 py-4 rounded-2xl text-sm font-medium transition-all duration-350 relative ${active ? 'bg-[#d9eb54] text-[#012b25] font-bold shadow-md shadow-emerald-950/30' : 'text-emerald-100/70 hover:bg-[#043c34]/50 hover:text-white'}`}>
-                  <Icon className={`w-4 h-4 ${active ? 'stroke-[2.5]' : ''}`} /> {item.label}
-                  {active && <span className="absolute right-4 w-1.5 h-1.5 rounded-full bg-[#012b25]" />}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-        <div className="p-5 border-t border-[#053d34]">
-          <div className="bg-[#033c32] rounded-3xl p-5 mb-5 border border-[#095246] relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 w-24 h-24 bg-[#d9eb54]/5 rounded-full" />
-            <div className="w-8 h-8 rounded-full bg-[#d9eb54]/10 border border-[#d9eb54]/20 flex items-center justify-center mb-3"><Trophy className="w-4 h-4 text-[#d9eb54]" /></div>
-            <h4 className="font-display text-sm font-bold text-white leading-tight">Upgrade Pro</h4>
-            <p className="text-[10px] text-emerald-300/70 mt-1 leading-relaxed">ปลดล็อค AI ปั่นสคริปต์ไม่จำกัด</p>
-            <button className="w-full bg-[#d9eb54] text-[#012b25] text-xs font-bold py-2.5 rounded-xl transition-all shadow-md mt-4 hover:bg-[#eaf96c]">Upgrade Now</button>
-          </div>
-          <div className="flex gap-2 text-xs">
-            <button onClick={() => { setClipForVOnly(true); setShowAddClip(true); }} className="flex-1 bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold py-3 rounded-2xl transition-all shadow-md flex items-center justify-center gap-1">+ บันทึกคลิป</button>
-            <label className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white hover:bg-[#044c40] transition-all cursor-pointer shadow-md flex items-center justify-center" title="อัปโหลดไฟล์แบคอัป JSON (Import)">
-              <Upload className="w-4 h-4" />
-              <input type="file" accept="application/json" onChange={importData} className="hidden" />
-            </label>
-            <button onClick={() => setShowSettings(true)} className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white hover:bg-[#044c40] transition-all shadow-md" title="การตั้งค่าระบบ"><Settings className="w-4 h-4" /></button>
-          </div>
-        </div>
-      </aside>
-
-      {/* CONTENT */}
-      <main className="flex-1 overflow-y-auto pb-24 lg:pb-10">
-        <header className="bg-white border-b border-[#e9eceb] px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sticky top-0 z-10">
+    <div className="min-h-screen bg-[#0d0f12] text-white font-sans selection:bg-[#ff6600] selection:text-white">
+      
+      {/* Top Navigation / Status Header */}
+      <header className="bg-[#14181f] border-b border-[#222936] px-6 py-4 flex items-center justify-between sticky top-0 z-40">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-[#ff6600] flex items-center justify-center font-black text-xs text-white">P6</div>
           <div>
-            <div className="text-[11px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1"><span>PEEM6PACK</span><ChevronRight className="w-3 h-3 text-slate-300" /><span className="text-emerald-800">{page.toUpperCase()}</span></div>
-            <h1 className="font-display text-2xl text-[#012b25] mt-1 leading-none">Command Center</h1>
+            <h2 className="font-black text-sm uppercase tracking-wide">Command Center</h2>
+            <p className="text-[10px] text-[#ff6600] font-mono">USER: {user.uid.substring(0,6)}... [ANONYMOUS]</p>
           </div>
-          <div className="flex items-center gap-4 self-end sm:self-auto">
-            <div className="relative">
-              <input type="text" placeholder="Search..." className="pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs w-48 md:w-60 focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" />
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            </div>
-            <button className="p-2.5 bg-[#f3f6f5] hover:bg-slate-200/60 rounded-full transition-all text-slate-600 relative"><Bell className="w-4 h-4" /><span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border border-white" /></button>
-            <div className="flex items-center gap-3 pl-2 border-l border-slate-200">
-              <div className="w-10 h-10 rounded-full bg-emerald-950 text-[#d9eb54] flex items-center justify-center font-bold shadow-md"><User className="w-5 h-5" /></div>
-              <div className="text-left hidden md:block"><div className="text-xs font-bold text-[#012b25]">James Bond</div><div className="text-[10px] text-slate-400 font-medium">@james.bond</div></div>
-            </div>
-          </div>
-        </header>
-
-        <div className="p-6 md:p-8 space-y-8">
-          {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
-          {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} />)}
-          {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
-          {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
-          {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
-          {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} />)}
         </div>
+
+        <div className="flex items-center gap-4">
+          {/* Syncing Indicator */}
+          {isSyncing && (
+            <span className="text-xs text-[#ff6600] font-mono flex items-center gap-1.5 animate-pulse">
+              <span className="w-1.5 h-1.5 bg-[#ff6600] rounded-full"></span>
+              SYNCING...
+            </span>
+          )}
+          {/* Sign Out Button */}
+          <button 
+            onClick={handleLogout}
+            className="text-xs font-mono text-[#a0aec0] hover:text-red-400 bg-[#1c232e] border border-[#2d3748] px-3 py-1.5 rounded-lg transition-colors"
+          >
+            DISCONNECT
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content Dashboard Zone */}
+      <main className="p-6 max-w-7xl mx-auto space-y-6">
+        
+        {/* 🎯 ส่วนแสดงผล Overview Goals */}
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-[#14181f] border border-[#222936] p-5 rounded-xl shadow-md">
+            <p className="text-xs font-mono text-[#a0aec0] uppercase tracking-wider mb-1">เป้าหมายรายได้ / เดือน</p>
+            <p className="text-2xl font-black text-[#ff6600]">฿{appSettings.monthlyRevenueTarget.toLocaleString()}</p>
+          </div>
+          <div className="bg-[#14181f] border border-[#222936] p-5 rounded-xl shadow-md">
+            <p className="text-xs font-mono text-[#a0aec0] uppercase tracking-wider mb-1">เป้าหมายทำคลิป / เดือน</p>
+            <p className="text-2xl font-black text-white">{appSettings.monthlyTarget} <span className="text-xs font-normal text-[#a0aec0]">คลิป</span></p>
+          </div>
+          <div className="bg-[#14181f] border border-[#222936] p-5 rounded-xl shadow-md">
+            <p className="text-xs font-mono text-[#a0aec0] uppercase tracking-wider mb-1">จำนวนสินค้าในระบบ</p>
+            <p className="text-2xl font-black text-white">{products.length} <span className="text-xs font-normal text-[#a0aec0]">รายการ</span></p>
+          </div>
+        </section>
+
+        {/* 📝 บอร์ดบันทึกงานด่วน */}
+        <section className="bg-[#14181f] border border-[#222936] p-5 rounded-xl shadow-md">
+          <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+            <span className="w-1.5 h-3 bg-[#ff6600] rounded-sm"></span> Notice Board / ไอเดียเร่งด่วน
+          </h3>
+          <p className="text-sm text-[#a0aec0] font-mono bg-[#0d0f12] p-4 rounded-lg border border-[#1c232e]">
+            {appSettings.noticeBoard || "ไม่มีประกาศหรือไอเดียค้างไว้... เริ่มลุยคอนเทนต์วันนี้ได้เลยพี่!"}
+          </p>
+        </section>
+
+        {/* ⚡ โครงสร้างฝั่ง Dashboard หลักของพี่ภีม (เอาโค้ด UI การจัดการตารางสินค้า/คลิปเดิม มาต่อตรงนี้ได้เลยครับ) */}
+        <section className="bg-[#14181f] border border-[#222936] p-6 rounded-xl text-center text-[#a0aec0] py-12">
+          <p className="text-sm font-mono">🛠️ ตารางจัดการคลิปและรายการสินค้าผูกตะกร้า TikTok (ต่อยอดโครงสร้าง UI เดิมของพี่ได้เลย)</p>
+        </section>
+
       </main>
+
+      {/* Global Toast */}
+      {toast.show && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#14181f] border-l-4 border-[#ff6600] text-white px-5 py-3 rounded-lg shadow-2xl font-mono text-sm flex items-center gap-2">
+          <span className="w-2 h-2 bg-[#ff6600] rounded-full animate-ping"></span>
+          {toast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
 
       {/* MODALS */}
       {showAddProduct && <AddProductModal onClose={() => setShowAddProduct(false)} onSave={addProduct} showGateWarning={(data) => setShowGateWarning(data)} showToast={showToast} />}
