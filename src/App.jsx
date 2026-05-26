@@ -1263,7 +1263,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 
 
 function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
-  const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState(''); const [filter, setFilter] = useState('scored');
   const [typeFilter, setTypeFilter] = useState('all'); const [sortBy, setSortBy] = useState('score');
   
   const [viewMode, setViewMode] = useState(() => { try { return localStorage.getItem('peem6pack_viewMode') || 'box'; } catch { return 'box'; } });
@@ -1271,8 +1271,12 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
 
   const filtered = useMemo(() => {
     let list = products.filter(p => {
-      const isStale = !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS;
+      const isPending = !p.lastScoredAt;
+      const isScored = !!p.lastScoredAt;
+      const isStale = p.lastScoredAt && daysSince(p.lastScoredAt) >= RESCORE_DAYS;
       if (search && !p.name?.toLowerCase().includes(search.toLowerCase())) return false;
+      if (filter === 'pending' && !isPending) return false;
+      if (filter === 'scored' && !isScored) return false;
       if (filter === 'stale' && !isStale) return false;
       if (['PICK', 'WAIT', 'DROP'].includes(filter.toUpperCase()) && p.decision?.toUpperCase() !== filter.toUpperCase()) return false;
       if (filter === 'locked' && !p.locked) return false;
@@ -1288,14 +1292,18 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
     return list;
   }, [products, search, filter, typeFilter, sortBy]);
 
-  const staleProducts = products.filter(p => !p.lastScoredAt || daysSince(p.lastScoredAt) >= RESCORE_DAYS);
+  const pendingProducts = products.filter(p => !p.lastScoredAt);
+  const staleProducts = products.filter(p => p.lastScoredAt && daysSince(p.lastScoredAt) >= RESCORE_DAYS);
+  const scoredProducts = products.filter(p => !!p.lastScoredAt);
+  const dropProducts = products.filter(p => p.decision === 'DROP');
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Products</span><div className="font-display text-2xl text-[#012b25] mt-1">{products.length}</div></div><div className="p-3 bg-slate-50 text-slate-400 rounded-2xl"><Package className="w-5 h-5" /></div></div>
-        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-amber-100 transition-colors" onClick={() => setFilter('stale')}><div><span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider block">Low Stock / Stale</span><div className="font-display text-2xl text-amber-600 mt-1">{staleProducts.length} <span className="text-xs font-sans text-amber-500">ชิ้น</span></div></div><div className="p-3 bg-white/50 text-amber-500 rounded-2xl"><AlertTriangle className="w-5 h-5" /></div></div>
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Drop Items</span><div className="font-display text-2xl text-[#dc2626] mt-1">{products.filter(p=>p.decision === 'DROP').length}</div></div><div className="p-3 bg-rose-50 text-rose-500 rounded-2xl"><X className="w-5 h-5" /></div></div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Products</span><div className="font-display text-2xl text-[#012b25] mt-1">{products.length}</div><div className="text-[10px] text-slate-400 mt-0.5">{scoredProducts.length} reviewed</div></div><div className="p-3 bg-slate-50 text-slate-400 rounded-2xl"><Package className="w-5 h-5" /></div></div>
+        <div className="bg-sky-50 border border-sky-200 rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-sky-100 transition-colors" onClick={() => setFilter('pending')} title="ดึงเข้ามาแต่ยังไม่ได้คัดกรอง"><div><span className="text-[10px] text-sky-700 font-bold uppercase tracking-wider block">Pending Review</span><div className="font-display text-2xl text-sky-600 mt-1">{pendingProducts.length} <span className="text-xs font-sans text-sky-500">ตัว</span></div><div className="text-[10px] text-sky-500 mt-0.5">ไม่เคยคัด — ghost จาก Radar</div></div><div className="p-3 bg-white/60 text-sky-500 rounded-2xl"><Sparkles className="w-5 h-5" /></div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-amber-100 transition-colors" onClick={() => setFilter('stale')} title={`คัดล่าสุดเกิน ${RESCORE_DAYS} วัน`}><div><span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider block">Stale</span><div className="font-display text-2xl text-amber-600 mt-1">{staleProducts.length} <span className="text-xs font-sans text-amber-500">ตัว</span></div><div className="text-[10px] text-amber-500 mt-0.5">รอ rescore (เกิน {RESCORE_DAYS} วัน)</div></div><div className="p-3 bg-white/50 text-amber-500 rounded-2xl"><Clock className="w-5 h-5" /></div></div>
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-rose-50 transition-colors" onClick={() => setFilter('drop')} title="สินค้าที่ตัดสินใจว่าจะตัด"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Drop Items</span><div className="font-display text-2xl text-[#dc2626] mt-1">{dropProducts.length}</div><div className="text-[10px] text-slate-400 mt-0.5">DROP decision</div></div><div className="p-3 bg-rose-50 text-rose-500 rounded-2xl"><X className="w-5 h-5" /></div></div>
       </div>
 
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
@@ -1304,7 +1312,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
           <div className="flex flex-wrap gap-2">
             <button onClick={onOpenRadar} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> สแกนเรดาร์ TikTok</button>
             <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Product</button>
-            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกพอร์ต</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="stale">⏱️ Stale</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
+            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="pending">🌱 Pending Review ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
             <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกหมวดหมู่</option>{PRODUCT_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select>
           </div>
         </div>
