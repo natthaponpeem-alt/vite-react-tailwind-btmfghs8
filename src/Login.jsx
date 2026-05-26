@@ -37,8 +37,8 @@ export default function Login() {
           <Fingerprint className="w-10 h-10" />
         </div>
         
-        <h1 className="text-3xl font-extrabold text-[#012b25] tracking-tight mb-2">Pharmly</h1>
-        <p className="text-sm text-slate-500 mb-8 font-medium">Command Center (Admin Only)</p>
+        <h1 className="text-3xl font-extrabold text-[#012b25] tracking-tight mb-2">PEEM6PACK</h1>
+        <p className="text-sm text-slate-500 mb-8 font-medium">Command Center · CMCT (Admin Only)</p>
 
         {error && (
           <div className="w-full bg-rose-50 border border-rose-100 text-rose-600 text-xs font-bold p-4 rounded-xl mb-6 flex items-start gap-2 text-left">
