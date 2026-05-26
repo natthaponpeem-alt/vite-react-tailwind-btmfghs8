@@ -6,17 +6,28 @@ import {
   Trophy, Search, RefreshCw, DollarSign, Activity, LayoutGrid, 
   List, ArrowUpDown, ExternalLink, Database, Flame, TrendingUp, 
   TrendingDown, AlertTriangle, Lightbulb, Repeat, Cloud, CloudOff, 
-  User, Bell, CalendarDays, LogOut
+  User, Bell, CalendarDays
 } from 'lucide-react';
 
 // ============================================================================
-// [ZONE 1] FIREBASE & AUTH IMPORTS (ARCHITECTURE: 3-FILE MODULAR)
+// [ZONE 1] FIREBASE CONFIGURATION & CONSTANTS
 // ============================================================================
-import { auth, db, ADMIN_EMAIL } from './firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
-import Login from './Login';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
 
+const firebaseConfig = {
+  apiKey: "AIzaSyDqum6bGwLqjInO04PCxuDV8pEl5UbwphI",
+  authDomain: "peem6pack-command.firebaseapp.com",
+  projectId: "peem6pack-command",
+  storageBucket: "peem6pack-command.firebasestorage.app",
+  messagingSenderId: "843579566868",
+  appId: "1:843579566868:web:1daa7700dab2739b757001"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 const APP_ID = 'peem6pack-command-v1';
 
 const TARGET_ANGLES = 7; 
@@ -190,10 +201,6 @@ function migrateClip(c) { if (!c) return c; if (c.views !== undefined && c.views
 // [ZONE 3] MAIN APPLICATION & CLOUD LIFECYCLE (Pharmly Architecture)
 // ============================================================================
 export default function App() {
-  // 🛡️ AUTH GUARD STATE (Google Auth + Email Whitelist)
-  const [authChecking, setAuthChecking] = useState(true);
-  const [authError, setAuthError] = useState('');
-
   const [user, setUser] = useState(null);
   const [dbInitialized, setDbInitialized] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -230,25 +237,8 @@ export default function App() {
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
   useEffect(() => {
-    // 🛡️ AUTH GUARD: Listen to auth state + enforce ADMIN_EMAIL whitelist
-    // Defense-in-depth: Login.jsx ALSO checks email — but we re-check here in case
-    // someone bypasses Login (browser auto-restore session, edge cases, etc.)
-    return onAuthStateChanged(auth, async (fbUser) => {
-      if (!fbUser) {
-        setUser(null);
-        setAuthChecking(false);
-        return;
-      }
-      if (fbUser.email !== ADMIN_EMAIL) {
-        setAuthError(`Access Denied: ${fbUser.email} ไม่มีสิทธิ์เข้าใช้งาน`);
-        try { await signOut(auth); } catch (e) { console.error(e); }
-        setUser(null);
-        setAuthChecking(false);
-        return;
-      }
-      setUser(fbUser);
-      setAuthChecking(false);
-    });
+    signInAnonymously(auth).catch(err => showToast("เชื่อมคลาวด์ล้มเหลว", "error"));
+    return onAuthStateChanged(auth, setUser);
   }, []);
 
   useEffect(() => {
@@ -394,34 +384,6 @@ export default function App() {
     return clips.filter(c => new Date(c.postedAt).getTime() >= cutoff).sort((a, b) => new Date(a.postedAt) - new Date(b.postedAt));
   }, [clips]);
 
-  // 🛡️ AUTH GUARD HANDLER (used by sidebar Logout button)
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      // After signOut, onAuthStateChanged listener fires → setUser(null) → Login screen renders
-    } catch (e) {
-      console.error(e);
-      showToast('Logout ผิดพลาด', 'error');
-    }
-  };
-
-  // 🟡 LOADING AUTH — checking Firebase session (gates blank flash)
-  if (authChecking) {
-    return (
-      <div className="min-h-screen bg-[#061b17] flex flex-col items-center justify-center space-y-4" style={{ fontFamily: "'Inter', 'Noto Sans Thai', sans-serif" }}>
-        <div className="w-14 h-14 border-4 border-emerald-950 border-t-lime-300 rounded-full animate-spin"></div>
-        <div className="font-semibold text-emerald-100 tracking-wider text-sm animate-pulse">VERIFYING ACCESS...</div>
-      </div>
-    );
-  }
-
-  // 🔴 NOT AUTHENTICATED → render Login screen
-  // Login.jsx handles its own error display on sign-in failure
-  if (!user) {
-    return <Login />;
-  }
-
-  // 🟢 AUTHENTICATED — proceed to data loading + dashboard
   if (!dbInitialized) {
     return (
       <div className="min-h-screen bg-[#061b17] flex flex-col items-center justify-center space-y-4">
@@ -482,7 +444,6 @@ export default function App() {
               <input type="file" accept="application/json" onChange={importData} className="hidden" />
             </label>
             <button onClick={() => setShowSettings(true)} className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-white hover:bg-[#044c40] transition-all shadow-md" title="การตั้งค่าระบบ"><Settings className="w-4 h-4" /></button>
-            <button onClick={handleLogout} className="p-3 bg-[#033c32] text-emerald-100 rounded-2xl hover:text-rose-200 hover:bg-rose-900/40 transition-all shadow-md" title="ออกจากระบบ"><LogOut className="w-4 h-4" /></button>
           </div>
         </div>
       </aside>
@@ -501,8 +462,8 @@ export default function App() {
             </div>
             <button className="p-2.5 bg-[#f3f6f5] hover:bg-slate-200/60 rounded-full transition-all text-slate-600 relative"><Bell className="w-4 h-4" /><span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border border-white" /></button>
             <div className="flex items-center gap-3 pl-2 border-l border-slate-200">
-              {user?.photoURL ? (<img src={user.photoURL} alt="" className="w-10 h-10 rounded-full shadow-md object-cover" />) : (<div className="w-10 h-10 rounded-full bg-emerald-950 text-[#d9eb54] flex items-center justify-center font-bold shadow-md"><User className="w-5 h-5" /></div>)}
-              <div className="text-left hidden md:block"><div className="text-xs font-bold text-[#012b25] truncate max-w-[140px]">{user?.displayName || 'Admin'}</div><div className="text-[10px] text-slate-400 font-medium truncate max-w-[140px]">{user?.email || ''}</div></div>
+              <div className="w-10 h-10 rounded-full bg-emerald-950 text-[#d9eb54] flex items-center justify-center font-bold shadow-md"><User className="w-5 h-5" /></div>
+              <div className="text-left hidden md:block"><div className="text-xs font-bold text-[#012b25]">James Bond</div><div className="text-[10px] text-slate-400 font-medium">@james.bond</div></div>
             </div>
           </div>
         </header>
