@@ -244,6 +244,44 @@ function getPostTodaySuggestions(products, clips) {
   return candidates;
 }
 
+function getVarietyAdvisor(last7DaysClips, products) {
+  if (!Array.isArray(last7DaysClips) || last7DaysClips.length < 2) {
+    return { hasAdvice: false, severity: 'none', message: 'ลงคลิปก่อน 3 ตัว → ระบบจะแนะนำ' };
+  }
+  const pattern = last7DaysClips.map(c => { if (c.isV) return 'V'; const p = (products||[]).find(pp => pp.id === c.productId); return p?.category || '?'; }).filter(c => c !== '?');
+  const total = pattern.length;
+  const counts = pattern.reduce((acc, cat) => { acc[cat] = (acc[cat] || 0) + 1; return acc; }, {});
+  const all = ['A', 'B', 'C', 'D', 'V'];
+  const missing = all.filter(c => !counts[c]);
+  const last3 = pattern.slice(-3);
+  const last3Same = last3.length === 3 && last3[0] === last3[1] && last3[1] === last3[2];
+  const dominantEntry = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+  const dominant = dominantEntry && (dominantEntry[1] / total) > 0.5 ? dominantEntry : null;
+  
+  if (last3Same) {
+    const cat = last3[0];
+    return { hasAdvice: true, severity: 'high', avoidCategory: cat,
+      suggestCategories: all.filter(c => c !== cat).slice(0, 3),
+      title: `🚨 ลง ${cat} 3 คลิปติด — สลับฟันปลา`,
+      message: `หลีกเลี่ยง ${cat} ในคลิปถัดไป → ลอง ${all.filter(c => c !== cat).slice(0,3).join(', ')}` };
+  }
+  if (dominant) {
+    const [cat, n] = dominant;
+    const suggests = missing.length > 0 ? missing : all.filter(c => c !== cat);
+    return { hasAdvice: true, severity: 'medium', avoidCategory: cat,
+      suggestCategories: suggests.slice(0, 3),
+      title: `⚡ ${cat} ครอง ${n}/${total} คลิป (${Math.round(n/total*100)}%)`,
+      message: missing.length > 0 ? `ขาด: ${missing.join(', ')} — เพิ่มความหลากหลาย` : `กระจายไป category อื่น` };
+  }
+  if (missing.length >= 2 && total >= 4) {
+    return { hasAdvice: true, severity: 'low', avoidCategory: null,
+      suggestCategories: missing.slice(0, 3),
+      title: `💡 ขาด: ${missing.join(', ')}`,
+      message: `7 วันยังไม่มี ${missing.join('/')} — ลองลง ${missing[0]} เพิ่ม` };
+  }
+  return { hasAdvice: false, severity: 'good', message: '✓ ความหลากหลายดี — กระจาย category สม่ำเสมอ' };
+}
+
 function getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }) {
   const warnings = [];
   if (concentration && concentration.pct >= CONCENTRATION_LIMIT) {
@@ -524,7 +562,7 @@ export default function App() {
           <div className="p-7 flex items-center justify-between border-b border-[#053d34]">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 bg-[#d9eb54] text-[#012b25] rounded-xl flex items-center justify-center font-extrabold text-xl shadow-lg">P6</div>
-              <div><h2 className="font-display text-lg leading-none tracking-tight">Pharmly</h2><span className="text-[11px] text-emerald-400/80 font-medium tracking-wide">Affiliate Platform</span></div>
+              <div><h2 className="font-display text-base leading-none tracking-tight">PEEM6PACK</h2><span className="text-[11px] text-emerald-400/80 font-medium tracking-wide">Command Center · CMCT</span></div>
             </div>
             {isSyncing ? <CloudOff className="w-4 h-4 text-amber-400 animate-pulse" /> : <Cloud className="w-4 h-4 text-emerald-400" />}
           </div>
@@ -811,6 +849,11 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const postSuggestions = useMemo(() => getPostTodaySuggestions(products, clips), [products, clips]);
   // ─── TIER 3: Smart Warnings ─────────────────────────────────────────────
   const warnings = useMemo(() => getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }), [concentration, hasRepeatIssue, productsNeedingRescore, mission]);
+  // ─── TIER 5: Strategic KPIs (Blended commission, Portfolio balance) ──────
+  const blendedComm = useMemo(() => getBlendedCommission(products, clips), [products, clips]);
+  const portfolioBalance = useMemo(() => getPortfolioBalance(products), [products]);
+  // ─── TIER 6 (Variety card): Smart zigzag advisor ─────────────────────────
+  const varietyAdvisor = useMemo(() => getVarietyAdvisor(last7DaysClips, products), [last7DaysClips, products]);
 
   return (
     <div className="space-y-6">
@@ -993,32 +1036,73 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
       </div>
 
       {/* ─── TIER 5: STATS SUMMARY (compact) ──────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Est. Profit · เดือนนี้</div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Est. Profit</div>
             <DollarSign className="w-4 h-4 text-emerald-700" />
           </div>
-          <div className="font-display text-2xl text-[#012b25]">฿{fmtNum(Math.round(totalProfitMonth))}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">กำไรประเมินจาก commission × GMV</div>
+          <div className="font-display text-xl md:text-2xl text-[#012b25]">฿{fmtNum(Math.round(totalProfitMonth))}</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">เดือนนี้ · commission × GMV</div>
+        </div>
+        <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Blended Comm.</div>
+            <TrendingUp className={`w-4 h-4 ${blendedComm >= BLENDED_COMMISSION_TARGET ? 'text-emerald-600' : blendedComm >= BLENDED_COMMISSION_TARGET * 0.8 ? 'text-amber-500' : 'text-rose-500'}`} />
+          </div>
+          <div className="font-display text-xl md:text-2xl text-[#012b25] flex items-baseline gap-1">
+            {blendedComm.toFixed(1)}<span className="text-sm text-slate-400">%</span>
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">เป้า ≥{BLENDED_COMMISSION_TARGET}% · weighted</div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Products</div>
             <Package className="w-4 h-4 text-slate-500" />
           </div>
-          <div className="font-display text-2xl text-[#012b25]">{products.length}</div>
+          <div className="font-display text-xl md:text-2xl text-[#012b25]">{products.length}</div>
           <div className="text-[10px] text-slate-400 mt-0.5">{lockedProducts.length} Locked เดือนนี้</div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Total Clips</div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Clips Total</div>
             <Activity className="w-4 h-4 text-sky-600" />
           </div>
-          <div className="font-display text-2xl text-[#012b25]">{clips.length}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">{totalClips7d} ใน 7 วันที่ผ่านมา</div>
+          <div className="font-display text-xl md:text-2xl text-[#012b25]">{clips.length}</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">{totalClips7d} ใน 7 วันล่าสุด</div>
         </div>
       </div>
+
+      {/* ─── TIER 5B: Portfolio Balance (ABCD distribution) ───────────── */}
+      {products.length > 0 && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><LayoutGrid className="w-4 h-4 text-emerald-700" /> Portfolio Balance</h3>
+              <p className="text-xs text-slate-400 mt-0.5">เป้า: A {PORTFOLIO_TARGET.A}% · B {PORTFOLIO_TARGET.B}% · C {PORTFOLIO_TARGET.C}% · D {PORTFOLIO_TARGET.D}%</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-2 md:gap-3">
+            {['A','B','C','D'].map(cat => {
+              const data = portfolioBalance[cat] || { count: 0, pct: 0, target: PORTFOLIO_TARGET[cat] };
+              const diff = data.pct - data.target;
+              const status = Math.abs(diff) <= 10 ? 'good' : Math.abs(diff) <= 20 ? 'warn' : 'bad';
+              const statusBg = status === 'good' ? 'bg-emerald-50 text-emerald-700' : status === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700';
+              const catInfo = getAbcdInfo(cat);
+              return (
+                <div key={cat} className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className={`w-7 h-7 rounded-lg ${catInfo.bg} text-white font-bold text-xs flex items-center justify-center`}>{catInfo.short}</div>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${statusBg}`}>{diff > 0 ? `+${diff.toFixed(0)}%` : `${diff.toFixed(0)}%`}</span>
+                  </div>
+                  <div className="font-display text-lg text-[#012b25]">{data.count}</div>
+                  <div className="text-[10px] text-slate-500">{data.pct.toFixed(0)}% / {data.target}%</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ─── DIVIDER — REFERENCE SECTION ──────────────────────────────── */}
       <div className="pt-6 pb-1 flex items-center gap-3">
@@ -1088,10 +1172,35 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-3">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Zap className="w-4 h-4 text-lime-500" /> Variety Pattern (7d)</h3>
-          <div className="flex flex-wrap gap-1.5 py-2">
+          <div className="flex flex-wrap gap-1.5 py-1">
             {pattern.length === 0 ? (<div className="text-xs text-slate-400 italic">ยังไม่มีประวัติคลิป</div>) : (pattern.map((cat, idx) => { const catInfo = getAbcdInfo(cat); return (<div key={idx} className={`w-7 h-7 rounded-lg ${catInfo.bg} text-white font-display flex items-center justify-center text-[11px] shadow-sm`}>{catInfo.short}</div>); }))}
           </div>
-          <div className="text-[10px] text-slate-500">แต่ละช่อง = 1 คลิป · สี = หมวด ABCD/V</div>
+          {varietyAdvisor.hasAdvice ? (
+            <div className={`rounded-2xl p-3 border text-xs ${
+              varietyAdvisor.severity === 'high' ? 'bg-rose-50 border-rose-100' :
+              varietyAdvisor.severity === 'medium' ? 'bg-amber-50 border-amber-100' :
+              'bg-sky-50 border-sky-100'
+            }`}>
+              <div className={`font-bold ${
+                varietyAdvisor.severity === 'high' ? 'text-rose-800' :
+                varietyAdvisor.severity === 'medium' ? 'text-amber-800' :
+                'text-sky-800'
+              }`}>{varietyAdvisor.title}</div>
+              <div className="text-[11px] text-slate-600 mt-1">{varietyAdvisor.message}</div>
+              {varietyAdvisor.suggestCategories?.length > 0 && (
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-slate-500 font-semibold">ถัดไป:</span>
+                  {varietyAdvisor.suggestCategories.map(c => { const ci = getAbcdInfo(c); return (<span key={c} className={`text-[10px] px-2 py-1 rounded-md font-bold ${ci.bg} text-white shadow-sm`}>{ci.short}</span>); })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-2.5 text-[11px] text-emerald-800 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+              <span>{varietyAdvisor.message}</span>
+            </div>
+          )}
+          <div className="text-[10px] text-slate-400">แต่ละช่อง = 1 คลิป · ฟันปลา = สลับ category</div>
         </div>
       </div>
 
@@ -1550,7 +1659,10 @@ function ClipLogPage({ products, clips, onEditClip }) {
                   const statusLabels = { paid: 'จ่ายแล้ว', pending: 'รอโอน', failed: 'ยกเลิก' }[commStatus];
                   return (
                     <tr key={c.id} onClick={() => onEditClip(c.id)} className="hover:bg-slate-50/80 cursor-pointer transition-colors text-slate-700 group">
-                      <td className="p-3 whitespace-nowrap font-mono">{fmtDate(c.postedAt)}</td>
+                      <td className="p-3 whitespace-nowrap font-mono">
+                        <div>{fmtDate(c.postedAt)}</div>
+                        {c.postedAt && (<div className="text-[10px] text-slate-400 mt-0.5">{new Date(c.postedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</div>)}
+                      </td>
                       <td className="p-3"><div className="flex items-center gap-2"><div className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0 ${catInfo.bg}`}>{catInfo.short}</div><span className="font-semibold text-slate-900 truncate max-w-[140px] block">{c.isV ? '📚 สาระความรู้ (V)' : (prod?.name || '-')}</span></div></td>
                       <td className="p-3 text-slate-500 font-medium group-hover:text-emerald-800 transition-colors"><div className="line-clamp-2 leading-relaxed" title={c.hook}>{c.hook || '-'}</div></td>
                       <td className="p-3 text-center"><span className={`px-2 py-1 rounded-md text-[10px] font-bold ${statusColors}`}>{statusLabels}</span></td>
