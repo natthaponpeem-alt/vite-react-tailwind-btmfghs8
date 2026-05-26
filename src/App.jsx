@@ -851,7 +851,14 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const warnings = useMemo(() => getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }), [concentration, hasRepeatIssue, productsNeedingRescore, mission]);
   // ─── TIER 5: Strategic KPIs (Blended commission, Portfolio balance) ──────
   const blendedComm = useMemo(() => getBlendedCommission(products, clips), [products, clips]);
-  const portfolioBalance = useMemo(() => getPortfolioBalance(products), [products]);
+  const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips), [products, clips]);
+  // Product count by category (fallback when no GMV data yet)
+  const productCountByCat = useMemo(() => {
+    const acc = { A: 0, B: 0, C: 0, D: 0 };
+    products.forEach(p => { if (acc[p.category] !== undefined) acc[p.category]++; });
+    const total = acc.A + acc.B + acc.C + acc.D;
+    return { counts: acc, total };
+  }, [products]);
   // ─── TIER 6 (Variety card): Smart zigzag advisor ─────────────────────────
   const varietyAdvisor = useMemo(() => getVarietyAdvisor(last7DaysClips, products), [last7DaysClips, products]);
 
@@ -1048,12 +1055,12 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Blended Comm.</div>
-            <TrendingUp className={`w-4 h-4 ${blendedComm >= BLENDED_COMMISSION_TARGET ? 'text-emerald-600' : blendedComm >= BLENDED_COMMISSION_TARGET * 0.8 ? 'text-amber-500' : 'text-rose-500'}`} />
+            <TrendingUp className={`w-4 h-4 ${blendedComm && blendedComm.blended >= BLENDED_COMMISSION_TARGET ? 'text-emerald-600' : blendedComm && blendedComm.blended >= BLENDED_COMMISSION_TARGET * 0.8 ? 'text-amber-500' : 'text-slate-400'}`} />
           </div>
           <div className="font-display text-xl md:text-2xl text-[#012b25] flex items-baseline gap-1">
-            {blendedComm.toFixed(1)}<span className="text-sm text-slate-400">%</span>
+            {blendedComm ? blendedComm.blended.toFixed(1) : '—'}<span className="text-sm text-slate-400">%</span>
           </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">เป้า ≥{BLENDED_COMMISSION_TARGET}% · weighted</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">เป้า ≥{BLENDED_COMMISSION_TARGET}% · weighted by GMV</div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
@@ -1079,24 +1086,27 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><LayoutGrid className="w-4 h-4 text-emerald-700" /> Portfolio Balance</h3>
-              <p className="text-xs text-slate-400 mt-0.5">เป้า: A {PORTFOLIO_TARGET.A}% · B {PORTFOLIO_TARGET.B}% · C {PORTFOLIO_TARGET.C}% · D {PORTFOLIO_TARGET.D}%</p>
+              <p className="text-xs text-slate-400 mt-0.5">{portfolioBalance ? 'กระจาย GMV ตามหมวด' : 'จำนวนสินค้าตามหมวด (ยังไม่มี GMV)'} · เป้า: A {PORTFOLIO_TARGET.A}% · B {PORTFOLIO_TARGET.B}% · C {PORTFOLIO_TARGET.C}% · D {PORTFOLIO_TARGET.D}%</p>
             </div>
           </div>
           <div className="grid grid-cols-4 gap-2 md:gap-3">
             {['A','B','C','D'].map(cat => {
-              const data = portfolioBalance[cat] || { count: 0, pct: 0, target: PORTFOLIO_TARGET[cat] };
-              const diff = data.pct - data.target;
+              const catInfo = getAbcdInfo(cat);
+              const target = PORTFOLIO_TARGET[cat] || 0;
+              const bal = portfolioBalance?.[cat];
+              const actual = bal ? bal.actual : (productCountByCat.total > 0 ? Math.round(productCountByCat.counts[cat] / productCountByCat.total * 100) : 0);
+              const diff = actual - target;
               const status = Math.abs(diff) <= 10 ? 'good' : Math.abs(diff) <= 20 ? 'warn' : 'bad';
               const statusBg = status === 'good' ? 'bg-emerald-50 text-emerald-700' : status === 'warn' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700';
-              const catInfo = getAbcdInfo(cat);
+              const count = productCountByCat.counts[cat];
               return (
                 <div key={cat} className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
                   <div className="flex items-center justify-between mb-2">
                     <div className={`w-7 h-7 rounded-lg ${catInfo.bg} text-white font-bold text-xs flex items-center justify-center`}>{catInfo.short}</div>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${statusBg}`}>{diff > 0 ? `+${diff.toFixed(0)}%` : `${diff.toFixed(0)}%`}</span>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${statusBg}`}>{diff >= 0 ? `+${diff}%` : `${diff}%`}</span>
                   </div>
-                  <div className="font-display text-lg text-[#012b25]">{data.count}</div>
-                  <div className="text-[10px] text-slate-500">{data.pct.toFixed(0)}% / {data.target}%</div>
+                  <div className="font-display text-lg text-[#012b25]">{actual}<span className="text-xs text-slate-400">%</span></div>
+                  <div className="text-[10px] text-slate-500">{count} ตัว · เป้า {target}%</div>
                 </div>
               );
             })}
