@@ -186,6 +186,85 @@ function getAllTimeProductGMV(p, clips) {
 function migrateProduct(p) { if (!p) return p; const sc = p.scorecard || {}; if (sc.gmv7d !== undefined && sc.gmv7dPct === undefined) { const { gmv7d, gmv30d, ...rest } = sc; p.scorecard = rest; const s = calcScore(p.scorecard); p.score = s.total; p.maxScore = s.max; p.scorePct = s.pct; p.decision = getDecision(s.pct); } return p; }
 function migrateClip(c) { if (!c) return c; if (c.views !== undefined && c.views7d === undefined) { c.views7d = c.views; delete c.views; } if (c.link !== undefined && c.videoLink === undefined) { c.videoLink = c.link; delete c.link; } return c; }
 
+// ─── DECISION-FIRST DASHBOARD HELPERS ─────────────────────────────────────────
+function getTodayMission(clips, monthlyTarget) {
+  const now = new Date();
+  const year = now.getFullYear(); const month = now.getMonth(); const dayOfMonth = now.getDate();
+  const todayStrVal = todayStr();
+  const ym = `${year}-${String(month+1).padStart(2,'0')}`;
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const daysRemaining = Math.max(1, daysInMonth - dayOfMonth + 1);
+  const clipsThisMonth = (clips || []).filter(c => c.postedAt?.slice(0,7) === ym).length;
+  const clipsToday = (clips || []).filter(c => c.postedAt?.slice(0,10) === todayStrVal).length;
+  const clipsRemaining = Math.max(0, monthlyTarget - clipsThisMonth);
+  const todayQuota = Math.max(0, Math.ceil(clipsRemaining / daysRemaining));
+  const needToday = Math.max(0, todayQuota - clipsToday);
+  const expectedByNow = monthlyTarget * (dayOfMonth / daysInMonth);
+  const ratio = expectedByNow > 0 ? clipsThisMonth / expectedByNow : 1;
+  let status, statusLabel, statusBg;
+  if (ratio >= 1.0) { status = 'ahead'; statusLabel = 'AHEAD'; statusBg = 'bg-[#d9eb54] text-[#012b25]'; }
+  else if (ratio >= 0.85) { status = 'ontrack'; statusLabel = 'ON TRACK'; statusBg = 'bg-emerald-400/30 text-emerald-100'; }
+  else if (ratio >= 0.65) { status = 'slightly_behind'; statusLabel = 'CATCH UP'; statusBg = 'bg-amber-400/30 text-amber-100'; }
+  else { status = 'behind'; statusLabel = 'BEHIND'; statusBg = 'bg-rose-500/40 text-rose-100'; }
+  return { needToday, todayQuota, clipsToday, clipsThisMonth, monthlyTarget, daysRemaining, daysInMonth, daysElapsed: dayOfMonth,
+    monthPct: Math.min(100, Math.round(clipsThisMonth / Math.max(1, monthlyTarget) * 100)),
+    expectedPct: Math.min(100, Math.round(dayOfMonth / daysInMonth * 100)),
+    todayPct: todayQuota > 0 ? Math.min(100, Math.round(clipsToday / todayQuota * 100)) : (clipsToday > 0 ? 100 : 0),
+    avgPerDay: daysRemaining > 0 ? (clipsRemaining / daysRemaining).toFixed(1) : '0',
+    status, statusLabel, statusBg, ratio };
+}
+
+function getPostTodaySuggestions(products, clips) {
+  if (!Array.isArray(products)) return [];
+  const todayStrVal = todayStr(); const ym = currentMonth();
+  const postedToday = new Set((clips || []).filter(c => c.postedAt?.slice(0,10) === todayStrVal && !c.isV).map(c => c.productId));
+  const candidates = products.map(p => {
+    if (p.decision === 'DROP') return null;
+    if (postedToday.has(p.id)) return null;
+    const reasons = []; let score = 0;
+    const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0,7) === ym).length;
+    const clipsThisWeek = clips.filter(c => c.productId === p.id && daysSince(c.postedAt) <= 7).length;
+    const s30 = getProductSales(p, clips, 30); const s7 = getProductSales(p, clips, 7);
+    const sales30 = s30.primary || 0; const sales7 = s7.primary || 0;
+    const momentum = sales30 > 0 ? (sales7 / 7) / (sales30 / 30) : 1;
+    if (p.locked?.month === ym) {
+      const target = p.locked.targetClips || 10; const behind = target - clipsThisMonth;
+      if (behind > 0) { score += 3 + Math.min(2, Math.floor(behind / 3)); reasons.push({ text: `🔒 Locked ${clipsThisMonth}/${target}`, color: 'bg-amber-50 text-amber-700 border border-amber-100' }); }
+    }
+    if (momentum > 1.2 && sales30 > 5000) { score += 2; const pct = Math.round((momentum - 1) * 100); reasons.push({ text: `🔥 +${pct}% momentum`, color: 'bg-rose-50 text-rose-700 border border-rose-100' }); }
+    if (p.category === 'A' && sales30 > 20000 && clipsThisWeek < 3) { score += 2; reasons.push({ text: 'A-tier hot', color: 'bg-emerald-50 text-emerald-700 border border-emerald-100' }); }
+    if (clipsThisWeek === 0 && (p.category === 'A' || p.category === 'B')) { score += 1; reasons.push({ text: 'Idle 7d', color: 'bg-sky-50 text-sky-700 border border-sky-100' }); }
+    if (score === 0) return null;
+    let statLabel, statValue;
+    if (p.locked?.month === ym) { statLabel = 'LOCK'; statValue = `${clipsThisMonth}/${p.locked.targetClips || 10}`; }
+    else if (sales30 > 0) { statLabel = 'GMV 30D'; statValue = `฿${fmtNum(sales30)}`; }
+    else { statLabel = 'CLIPS'; statValue = String(clipsThisMonth); }
+    return { product: p, score, reasons, clipsThisMonth, sales30, momentum, statLabel, statValue };
+  }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 5);
+  return candidates;
+}
+
+function getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }) {
+  const warnings = [];
+  if (concentration && concentration.pct >= CONCENTRATION_LIMIT) {
+    warnings.push({ id: 'conc', bg: 'bg-rose-50', border: 'border-rose-100', iconBg: 'bg-rose-100', iconColor: 'text-rose-600', titleColor: 'text-rose-900',
+      title: `หลีกเลี่ยง: ${concentration.product?.name || '?'}`, subtitle: `กิน ${concentration.pct}% ของพอร์ต — กระจายไปสินค้าอื่นวันนี้` });
+  }
+  if (mission && mission.status === 'behind' && mission.daysRemaining <= 10) {
+    warnings.push({ id: 'behind', bg: 'bg-rose-50', border: 'border-rose-100', iconBg: 'bg-rose-100', iconColor: 'text-rose-600', titleColor: 'text-rose-900',
+      title: `ตามหลังเป้า — เหลือ ${mission.daysRemaining} วัน`, subtitle: `ต้องลง ${mission.todayQuota} คลิป/วัน ปิดเป้า ${mission.monthlyTarget}` });
+  }
+  if (hasRepeatIssue) {
+    warnings.push({ id: 'repeat', bg: 'bg-amber-50', border: 'border-amber-100', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', titleColor: 'text-amber-900',
+      title: 'ลงสินค้าหมวดเดิม 3 วันติด', subtitle: 'สลับ category อื่นเพื่อกัน fatigue ผู้ติดตาม' });
+  }
+  if (productsNeedingRescore && productsNeedingRescore.length >= 3) {
+    warnings.push({ id: 'rescore', bg: 'bg-sky-50', border: 'border-sky-100', iconBg: 'bg-sky-100', iconColor: 'text-sky-600', titleColor: 'text-sky-900',
+      title: `${productsNeedingRescore.length} สินค้ารอ Rescore`, subtitle: 'ใช้เวลา 1 นาที/ตัว — ให้ classifier แม่นยำขึ้น' });
+  }
+  return warnings;
+}
+
 // ============================================================================
 // [ZONE 3] MAIN APPLICATION & CLOUD LIFECYCLE (Pharmly Architecture)
 // ============================================================================
@@ -508,7 +587,7 @@ export default function App() {
         </header>
 
         <div className="p-6 md:p-8 space-y-8">
-          {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} />)}
+          {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPickToPost={(productId) => { if (productId) { setSelectedProductId(productId); setClipForVOnly(false); } else { setClipForVOnly(false); } setShowAddClip(true); }} onAddVClip={() => { setClipForVOnly(true); setShowAddClip(true); }} />)}
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
@@ -675,7 +754,7 @@ function VBar({ label, value, target, sub, suffix = "" }) {
   );
 }
 
-function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, appSettings, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone }) {
+function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, appSettings, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone, onPickToPost, onAddVClip }) {
   const today = todayStr();
   const currentMonthKey = currentMonth();
   
@@ -726,134 +805,185 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const winners = useMemo(() => getWinners(clips, products).slice(0, 5), [clips, products]);
   const repostCandidates = useMemo(() => getRepostCandidates(clips, products).slice(0, 3), [clips, products]);
 
+  // ─── TIER 1: Today's Mission ────────────────────────────────────────────
+  const mission = useMemo(() => getTodayMission(clips, appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET), [clips, appSettings]);
+  // ─── TIER 2: What to Post Today ─────────────────────────────────────────
+  const postSuggestions = useMemo(() => getPostTodaySuggestions(products, clips), [products, clips]);
+  // ─── TIER 3: Smart Warnings ─────────────────────────────────────────────
+  const warnings = useMemo(() => getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }), [concentration, hasRepeatIssue, productsNeedingRescore, mission]);
+
   return (
-    <div className="space-y-8">
-      {/* Notice Board (ดึงจากหน้า Settings) */}
-      {appSettings?.noticeBoard && (
-        <div className="bg-gradient-to-r from-[#012b25] to-[#034c40] rounded-3xl p-6 shadow-[0_8px_30px_rgba(0,0,0,0.12)] text-white flex items-start gap-4">
-          <div className="p-3 bg-[#d9eb54] text-[#012b25] rounded-2xl flex-shrink-0 shadow-inner"><Lightbulb className="w-6 h-6" /></div>
-          <div>
-            <h3 className="font-display text-lg text-[#d9eb54] mb-1.5 flex items-center gap-2">Weekly Strategy Notice</h3>
-            <p className="text-sm text-emerald-50/90 whitespace-pre-wrap leading-relaxed">{appSettings.noticeBoard}</p>
-          </div>
-        </div>
-      )}
+    <div className="space-y-6">
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-       <OverviewKPI icon={DollarSign} label={`Est. Profit (เดือน ${currentMonthKey.split('-')[1]})`} value={`฿${fmtNum(Math.round(totalProfitMonth))}`} sub="ประเมินกำไรเดือนปัจจุบัน" isPrimary={true} />
-        <OverviewKPI icon={User} label="Total Products (Port)" value={products.length} sub="รายการสินค้าในคลัง" />
-        <OverviewKPI icon={Activity} label="Total Clips" value={clips.length} sub="คลิปสะสมทั้งหมดในระบบ" />
-      </div>
-
-      {/* ⚠️ สินค้าครบกำหนดคัดกรองคะแนน (Rescore Alert) */}
-      {productsNeedingRescore && productsNeedingRescore.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div>
-          <div className="flex items-center justify-between ml-2">
-            <div className="flex items-center gap-2 text-amber-900 font-bold">
-              <Clock className="w-5 h-5 text-amber-600" />
-              <h3 className="font-display text-base">รายการสินค้าที่ต้องประเมินคะแนน (NEW & Stale)</h3>
-              <span className="bg-amber-200 text-amber-800 text-[10px] px-2 py-0.5 rounded-full">{productsNeedingRescore.length} รายการ</span>
+      {/* ─── TIER 1: TODAY'S MISSION (Hero) ───────────────────────────── */}
+      <div className="bg-gradient-to-br from-[#012b25] via-[#023831] to-[#034c40] rounded-3xl p-6 md:p-8 shadow-[0_8px_30px_rgba(0,0,0,0.15)] text-white relative overflow-hidden">
+        <div className="absolute -top-16 -right-16 w-56 h-56 bg-[#d9eb54]/8 rounded-full" />
+        <div className="absolute -bottom-12 -left-12 w-40 h-40 bg-[#d9eb54]/5 rounded-full" />
+        <div className="relative">
+          <div className="flex items-center justify-between mb-5">
+            <div className="text-[11px] uppercase tracking-widest text-emerald-200/70 font-bold flex items-center gap-2">
+              <CalendarDays className="w-3.5 h-3.5" /> วันนี้ · {new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'short' })}
             </div>
-            <button onClick={() => onGoTo('products')} className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-sm hidden sm:block">ไปจัดการ</button>
+            <span className={`text-[10px] font-bold px-3 py-1 rounded-full ${mission.statusBg}`}>{mission.statusLabel}</span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 ml-2">
-            {productsNeedingRescore.slice(0, 8).map(p => (
-              <div key={p.id} onClick={() => onSelectProduct(p.id)} className="bg-white border border-amber-100 p-3 rounded-2xl cursor-pointer hover:shadow-md hover:border-amber-300 transition-all flex items-center justify-between group">
-                <div className="truncate text-sm font-semibold text-slate-800 pr-2 group-hover:text-amber-700 transition-colors">{p.name}</div>
-                <div className={`text-[10px] px-2 py-1 rounded-lg font-bold whitespace-nowrap flex-shrink-0 ${!p.lastScoredAt ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-800'}`}>{!p.lastScoredAt ? 'NEW' : `${daysSince(p.lastScoredAt)} วัน`}</div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 items-center">
+            <div className="md:col-span-1">
+              <div className="text-[11px] uppercase tracking-widest text-[#d9eb54]/80 font-bold mb-2">วันนี้ต้องลงอีก</div>
+              <div className="flex items-baseline gap-3">
+                <div className="font-display text-[64px] md:text-7xl text-[#d9eb54] leading-none tracking-tight">{mission.needToday}</div>
+                <div className="text-sm text-emerald-200/60 font-semibold">/ {mission.todayQuota} คลิป</div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
+              <div className="text-[11px] text-emerald-200/60 mt-2 flex items-center gap-1.5">
+                {mission.clipsToday > 0 ? <><CheckCircle2 className="w-3 h-3 text-[#d9eb54]" /> ลงไปแล้ว {mission.clipsToday}</> : <>ยังไม่ได้ลงคลิปวันนี้</>}
+              </div>
+            </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm xl:col-span-2 space-y-4">
-          <div className="flex items-center justify-between"><div><h3 className="font-display text-lg text-[#012b25]">Sales Analytics</h3><p className="text-xs text-slate-400">ประเมินสถิติแรงกระตุ้นยอดขายคลิป</p></div></div>
-          <CapsuleChart data={salesAnalyticsData} />
-        </div>
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5">
-          <h3 className="font-display text-base text-[#012b25] flex items-center justify-between"><span>Top Selling Products</span><span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-1 rounded-md">All Time</span></h3>
-          <div className="flex justify-around items-end h-48 pt-4">
-            {topSellingProducts.length === 0 ? (<div className="text-center py-12 text-xs text-slate-400 italic w-full">ยังไม่มีสถิติ GMV</div>) : (
-              topSellingProducts.map((pData, idx) => {
-                const colors = ['bg-[#f26522]', 'bg-[#0d2a23]', 'bg-[#bcd924]'];
-                const scaleHeights = ['h-[85%]', 'h-[65%]', 'h-[45%]'];
-                return (
-                  <div key={pData.product.id} className="flex flex-col items-center flex-1">
-                    <div className="w-6 bg-slate-100 rounded-full h-32 flex items-end overflow-hidden"><div className={`w-full ${colors[idx]} rounded-full ${scaleHeights[idx]} flex items-center justify-center`}><span className="text-[8px] font-bold text-white rotate-90 whitespace-nowrap">{truncate(pData.product.name, 12)}</span></div></div>
-                    <span className="text-[10px] font-bold text-slate-800 font-mono mt-2">฿{fmtNum(pData.gmv)}</span>
-                  </div>
-                );
-              })
-            )}
+            <div className="md:col-span-1 space-y-3 md:border-l md:border-r md:border-white/10 md:px-6">
+              <div>
+                <div className="flex items-center justify-between text-[11px] mb-1.5">
+                  <span className="uppercase tracking-wider font-bold text-emerald-100/80">วันนี้</span>
+                  <span className="font-mono text-emerald-100">{mission.clipsToday}/{mission.todayQuota}</span>
+                </div>
+                <div className="h-2 bg-[#011a16] rounded-full overflow-hidden">
+                  <div className="h-full bg-[#d9eb54] rounded-full transition-all duration-500" style={{ width: `${mission.todayPct}%` }} />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between text-[11px] mb-1.5">
+                  <span className="uppercase tracking-wider font-bold text-emerald-100/80">เดือนนี้</span>
+                  <span className="font-mono text-emerald-100">{mission.clipsThisMonth}/{mission.monthlyTarget}</span>
+                </div>
+                <div className="h-2 bg-[#011a16] rounded-full overflow-hidden relative">
+                  <div className="absolute top-0 bottom-0 w-px bg-amber-300/70 z-10" style={{ left: `${mission.expectedPct}%` }} title="Expected by now" />
+                  <div className="h-full bg-emerald-300 rounded-full transition-all duration-500" style={{ width: `${mission.monthPct}%` }} />
+                </div>
+                <div className="text-[10px] text-emerald-200/60 mt-1.5">เหลือ {mission.daysRemaining} วัน · เฉลี่ย {mission.avgPerDay} คลิป/วัน</div>
+              </div>
+            </div>
+
+            <div className="md:col-span-1 grid grid-cols-2 gap-3">
+              <button onClick={() => onPickToPost && onPickToPost(null)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold py-3 rounded-xl shadow-md flex flex-col items-center justify-center transition-all">
+                <Plus className="w-4 h-4 mb-0.5" />
+                <span className="text-xs">+ คลิปสินค้า</span>
+              </button>
+              <button onClick={() => onAddVClip && onAddVClip()} className="bg-[#033c32] hover:bg-[#044c40] text-emerald-100 font-bold py-3 rounded-xl shadow-md flex flex-col items-center justify-center transition-all border border-[#d9eb54]/20">
+                <FileText className="w-4 h-4 mb-0.5" />
+                <span className="text-xs">+ V Content</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25] flex items-center gap-1.5"><Target className="w-4 h-4 text-emerald-800" /> ตรวจสอบเป้าหมายคุณภาพ หลัก 3V (7 วันล่าสุด)</h3></div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <VBar label="Volume (จำนวนคลิป)" value={totalClips7d} target={21} sub={`${avgPerDay} คลิป/วัน`} />
-          <VBar label="Value (คลิปให้ความรู้)" value={vRatio} target={30} suffix="%" sub={`${vRatio}% V-Clips`} />
-          <VBar label="Variety (ความหลากหลาย)" value={uniqueProducts7d} target={4} sub={`${uniqueProducts7d} แบรนด์`} />
-        </div>
-      </div>
-
-      {concentration && concentration.pct >= CONCENTRATION_LIMIT && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-3xl p-5 flex items-start gap-3 shadow-sm">
-          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-          <div><h4 className="font-display text-sm">แจ้งเตือนความเสี่ยง: พึ่งพิงยอดขายสินค้าตัวเดียวเกินไป ({concentration.pct}%)</h4><p className="text-xs text-slate-500 mt-1">สินค้า "{concentration.product?.name}" ครองสัดส่วนพอร์ตเกินเซฟโซนที่ {CONCENTRATION_LIMIT}% กระจายความเสี่ยงด่วน</p></div>
+      {/* Notice Board (Weekly strategy from Settings) */}
+      {appSettings?.noticeBoard && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-start gap-4">
+          <div className="p-2.5 bg-[#d9eb54] text-[#012b25] rounded-xl flex-shrink-0"><Lightbulb className="w-5 h-5" /></div>
+          <div>
+            <h3 className="font-display text-sm text-[#012b25] mb-1 flex items-center gap-2">Weekly Strategy Notice</h3>
+            <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">{appSettings.noticeBoard}</p>
+          </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm lg:col-span-2 space-y-4">
-          <h3 className="font-display text-base flex items-center gap-2"><Flame className="w-4 h-4 text-rose-500" /> 🔥 อันดับสินค้าทำเงินสูงสุด</h3>
-          <div className="divide-y divide-slate-100">
-            {topSellingProducts.map((t, i) => {
-              const catInfo = getAbcdInfo(t.product?.category);
+      {/* ─── TIER 2: WHAT TO POST TODAY ───────────────────────────────── */}
+      {postSuggestions.length > 0 && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-700" /> ลงสินค้าอะไรวันนี้
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">คัดจาก Lock List + GMV momentum + ความว่างเว้น</p>
+            </div>
+            <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-full">{postSuggestions.length} แนะนำ</span>
+          </div>
+          <div className="space-y-2">
+            {postSuggestions.map((s, idx) => {
+              const catInfo = getAbcdInfo(s.product.category);
               return (
-                <button key={t.product.id} onClick={() => onSelectProduct(t.product.id)} className="w-full py-3.5 flex items-center justify-between text-left hover:bg-slate-50 px-2 rounded-xl transition-all">
-                  <div className="flex items-center gap-3 min-w-0"><span className="font-display text-slate-400 w-4">#{i+1}</span><div className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div><div className="min-w-0"><div className="font-semibold text-sm text-slate-800 truncate">{t.product.name}</div><div className="text-[11px] text-slate-400 font-mono">คอม {t.commission}%</div></div></div>
-                  <div className="text-right flex-shrink-0 font-mono text-xs font-bold text-slate-800">฿{fmtNum(t.gmv)}</div>
-                </button>
+                <div key={s.product.id} className="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl transition-all border border-slate-100/60 group">
+                  <div className="font-display text-2xl text-slate-300 w-7 text-center flex-shrink-0 group-hover:text-[#012b25] transition-colors">#{idx+1}</div>
+                  <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
+                  <div className="flex-1 min-w-0">
+                    <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {s.reasons.map((r, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${r.color}`}>{r.text}</span>))}
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0 hidden sm:block">
+                    <div className="text-[9px] text-slate-400 uppercase tracking-wider font-bold">{s.statLabel}</div>
+                    <div className="font-mono text-xs font-bold text-[#012b25]">{s.statValue}</div>
+                  </div>
+                  <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> คลิป
+                  </button>
+                </div>
               );
             })}
           </div>
         </div>
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-3">
-          <h3 className="font-display text-base flex items-center gap-2"><Zap className="w-4 h-4 text-lime-500" /> Variety โพสต์ (7 วัน)</h3>
-          <div className="flex flex-wrap gap-1.5 py-2">
-            {pattern.length === 0 ? (<div className="text-xs text-slate-400 italic">ยังไม่มีประวัติคลิป</div>) : (pattern.map((cat, idx) => { const catInfo = getAbcdInfo(cat); return (<div key={idx} className={`w-8 h-8 rounded-lg ${catInfo.bg} text-white font-display flex items-center justify-center text-xs shadow-sm`}>{catInfo.short}</div>); }))}
-          </div>
-          {hasRepeatIssue && (<div className="bg-rose-50 text-rose-700 text-[11px] p-2.5 rounded-xl border border-rose-100 flex items-start gap-1.5"><AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><div>ลงรหัสซ้ำติดต่อกันเกินไป เสี่ยงผู้ติดตามเบื่อ ควรจัดระเบียบแบบฟันปลา</div></div>)}
-        </div>
-      </div>
+      )}
 
+      {/* ─── TIER 3: SMART WARNINGS (only if any) ─────────────────────── */}
+      {warnings.length > 0 && (
+        <div className="space-y-2">
+          {warnings.map(w => (
+            <div key={w.id} className={`flex items-start gap-3 p-4 rounded-2xl border ${w.bg} ${w.border} shadow-sm`}>
+              <div className={`p-2 rounded-xl ${w.iconBg} flex-shrink-0`}>
+                {w.id === 'conc' && <AlertTriangle className={`w-4 h-4 ${w.iconColor}`} />}
+                {w.id === 'behind' && <TrendingDown className={`w-4 h-4 ${w.iconColor}`} />}
+                {w.id === 'repeat' && <AlertCircle className={`w-4 h-4 ${w.iconColor}`} />}
+                {w.id === 'rescore' && <Clock className={`w-4 h-4 ${w.iconColor}`} />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className={`font-bold text-sm ${w.titleColor}`}>{w.title}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{w.subtitle}</div>
+              </div>
+              {w.id === 'rescore' && <button onClick={() => onGoTo('products')} className="text-xs font-bold whitespace-nowrap text-sky-700 hover:underline self-center">ไปจัดการ →</button>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ─── TIER 4: OPPORTUNITIES ────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-[#7c3aed]" /> ⏱️ ระบบแจ้งเตือนคิวทำซ้ำ (Repost)</h3></div>
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-[#7c3aed]" /> Repost Queue</h3>
+            {repostCandidates.length > 0 && <span className="text-[10px] bg-[#7c3aed]/10 text-[#7c3aed] font-bold px-2 py-0.5 rounded-full">{repostCandidates.length}</span>}
+          </div>
           <div className="space-y-3">
-            {repostCandidates.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ไม่มีประวัติคลิป Winner เข้าเกณฑ์</p>) : (
+            {repostCandidates.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ไม่มี Winner เข้าเกณฑ์ repost</p>) : (
               repostCandidates.map(r => (
-                <div key={r.clip.id} className="p-4 bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs border border-slate-100/50">
-                  <div className="min-w-0 flex-1"><div className="font-bold text-slate-800 truncate">{r.clip.hook || 'ไม่มีคำเปิดหัว'}</div><div className="text-[10px] text-slate-400 font-mono mt-0.5">ยอดเดิม ฿{fmtNum(r.clip.gmv)} ({r.daysOld} วันที่แล้ว)</div></div>
-                  <div className="flex gap-1.5 flex-shrink-0"><button onClick={() => onMakeSimilar(r.clip)} className="bg-[#d9eb54] text-[#012b25] font-bold px-3 py-1.5 rounded-lg">ปั่นสคริปต์ใหม่</button><button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="bg-[#e2f7e4] text-[#1d7c2a] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1">✓ โพสต์แล้ว</button></div>
+                <div key={r.clip.id} className="p-3.5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs border border-slate-100/50">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-800 truncate">{r.clip.hook || 'ไม่มี Hook'}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">฿{fmtNum(r.clip.gmv)} · {r.daysOld}d ago · D{r.repostBucket}</div>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <button onClick={() => onMakeSimilar(r.clip)} className="bg-[#d9eb54] text-[#012b25] font-bold px-2.5 py-1.5 rounded-lg text-[11px]">ปั่นสคริปต์</button>
+                    <button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="bg-[#e2f7e4] text-[#1d7c2a] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 text-[11px]">✓ ลงแล้ว</button>
+                  </div>
                 </div>
               ))
             )}
           </div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> 🏆 คลังเก็บประวัติผู้ชนะ (Winner)</h3></div>
-          <div className="space-y-3">
-            {winners.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ยังไม่มีคลิปยอดเกิน ฿1,000</p>) : (
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Winners Archive</h3>
+            {winners.length > 0 && <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full">{winners.length}</span>}
+          </div>
+          <div className="space-y-2.5">
+            {winners.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ยังไม่มีคลิปยอด ≥ ฿{fmtNum(WINNER_GMV)}</p>) : (
               winners.map(w => (
-                <div key={w.clip.id} className="p-3.5 bg-amber-50/50 border border-amber-100 rounded-2xl flex items-center justify-between gap-3 text-xs">
-                  <div className="min-w-0 flex-1"><div className="font-bold text-slate-800 truncate">{w.clip.hook || 'ไม่มีคำเปิดหัว'}</div><div className="text-[10px] text-slate-400 font-mono mt-0.5 font-semibold">สินค้า: {w.product?.name || 'V-Content'}</div></div>
+                <div key={w.clip.id} className="p-3 bg-amber-50/50 border border-amber-100 rounded-2xl flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-800 truncate">{w.clip.hook || 'ไม่มี Hook'}</div>
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{w.product?.name || 'V-Content'} · {w.daysOld}d</div>
+                  </div>
                   <span className="font-mono font-bold text-amber-700 text-sm flex-shrink-0">฿{fmtNum(w.clip.gmv)}</span>
                 </div>
               ))
@@ -862,20 +992,124 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       </div>
 
+      {/* ─── TIER 5: STATS SUMMARY (compact) ──────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Est. Profit · เดือนนี้</div>
+            <DollarSign className="w-4 h-4 text-emerald-700" />
+          </div>
+          <div className="font-display text-2xl text-[#012b25]">฿{fmtNum(Math.round(totalProfitMonth))}</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">กำไรประเมินจาก commission × GMV</div>
+        </div>
+        <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Products</div>
+            <Package className="w-4 h-4 text-slate-500" />
+          </div>
+          <div className="font-display text-2xl text-[#012b25]">{products.length}</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">{lockedProducts.length} Locked เดือนนี้</div>
+        </div>
+        <div className="bg-white border border-[#e9eceb] rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Total Clips</div>
+            <Activity className="w-4 h-4 text-sky-600" />
+          </div>
+          <div className="font-display text-2xl text-[#012b25]">{clips.length}</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">{totalClips7d} ใน 7 วันที่ผ่านมา</div>
+        </div>
+      </div>
+
+      {/* ─── DIVIDER — REFERENCE SECTION ──────────────────────────────── */}
+      <div className="pt-6 pb-1 flex items-center gap-3">
+        <div className="h-px bg-slate-200 flex-1" />
+        <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">Reference</div>
+        <div className="h-px bg-slate-200 flex-1" />
+      </div>
+
+      {/* ─── TIER 6A: RESCORE QUEUE (moved here) ──────────────────────── */}
+      {productsNeedingRescore && productsNeedingRescore.length > 0 && (
+        <div className="bg-white border border-amber-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div>
+          <div className="flex items-center justify-between ml-2">
+            <div className="flex items-center gap-2 text-amber-900 font-bold">
+              <Clock className="w-4 h-4 text-amber-600" />
+              <h3 className="font-display text-sm">รายการรอ Rescore</h3>
+              <span className="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded-full">{productsNeedingRescore.length} รายการ</span>
+            </div>
+            <button onClick={() => onGoTo('products')} className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold transition-all hidden sm:block">จัดการ</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 ml-2">
+            {productsNeedingRescore.slice(0, 8).map(p => (
+              <div key={p.id} onClick={() => onSelectProduct(p.id)} className="bg-white border border-amber-100 p-2.5 rounded-xl cursor-pointer hover:shadow-md hover:border-amber-300 transition-all flex items-center justify-between group">
+                <div className="truncate text-xs font-semibold text-slate-800 pr-2 group-hover:text-amber-700 transition-colors">{p.name}</div>
+                <div className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${!p.lastScoredAt ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-800'}`}>{!p.lastScoredAt ? 'NEW' : `${daysSince(p.lastScoredAt)}d`}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TIER 6B: SALES ANALYTICS + TOP SELLING ───────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm xl:col-span-2 space-y-4">
+          <div className="flex items-center justify-between">
+            <div><h3 className="font-display text-base text-[#012b25]">Sales Analytics</h3><p className="text-xs text-slate-400">ยอด GMV รายเดือน 12 เดือนล่าสุด</p></div>
+          </div>
+          <CapsuleChart data={salesAnalyticsData} />
+        </div>
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-display text-base text-[#012b25] flex items-center justify-between"><span>Top Selling</span><span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-1 rounded-md">All Time</span></h3>
+          <div className="divide-y divide-slate-100">
+            {topSellingProducts.length === 0 ? (<div className="text-center py-8 text-xs text-slate-400 italic">ยังไม่มีสถิติ GMV</div>) : (
+              topSellingProducts.map((t, i) => {
+                const catInfo = getAbcdInfo(t.product?.category);
+                return (
+                  <button key={t.product.id} onClick={() => onSelectProduct(t.product.id)} className="w-full py-2.5 flex items-center justify-between text-left hover:bg-slate-50 px-2 rounded-xl transition-all">
+                    <div className="flex items-center gap-2 min-w-0"><span className="font-display text-slate-400 w-4 text-xs">#{i+1}</span><div className={`w-6 h-6 rounded-md font-bold text-[10px] flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div><div className="min-w-0"><div className="font-semibold text-xs text-slate-800 truncate">{t.product.name}</div><div className="text-[10px] text-slate-400 font-mono">คอม {t.commission}%</div></div></div>
+                    <div className="text-right flex-shrink-0 font-mono text-[11px] font-bold text-slate-800">฿{fmtNum(t.gmv)}</div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── TIER 6C: 3V QUALITY + VARIETY 7-DAY ──────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4 lg:col-span-2">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Target className="w-4 h-4 text-emerald-800" /> 3V Quality (7 วัน)</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <VBar label="Volume" value={totalClips7d} target={21} sub={`${avgPerDay} คลิป/วัน`} />
+            <VBar label="Value" value={vRatio} target={30} suffix="%" sub={`${vRatio}% V-Clips`} />
+            <VBar label="Variety" value={uniqueProducts7d} target={4} sub={`${uniqueProducts7d} แบรนด์`} />
+          </div>
+        </div>
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-3">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Zap className="w-4 h-4 text-lime-500" /> Variety Pattern (7d)</h3>
+          <div className="flex flex-wrap gap-1.5 py-2">
+            {pattern.length === 0 ? (<div className="text-xs text-slate-400 italic">ยังไม่มีประวัติคลิป</div>) : (pattern.map((cat, idx) => { const catInfo = getAbcdInfo(cat); return (<div key={idx} className={`w-7 h-7 rounded-lg ${catInfo.bg} text-white font-display flex items-center justify-center text-[11px] shadow-sm`}>{catInfo.short}</div>); }))}
+          </div>
+          <div className="text-[10px] text-slate-500">แต่ละช่อง = 1 คลิป · สี = หมวด ABCD/V</div>
+        </div>
+      </div>
+
+      {/* ─── TIER 6D: LATEST CLIPS + FOCUSED PRODUCTS ─────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">Latest Clips (ค้างตรวจสถิติ)</h3><button onClick={() => onGoTo('log')} className="text-xs font-bold text-[#012b25] hover:underline">View All</button></div>
+          <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">Latest Clips (รออัปเดตสถิติ)</h3><button onClick={() => onGoTo('log')} className="text-xs font-bold text-[#012b25] hover:underline">View All</button></div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600">
-              <thead><tr className="bg-slate-50 font-bold border-b border-slate-100 text-slate-400"><th className="p-3">Clip Hook</th><th className="p-3">ประเภท</th><th className="p-3">สถานะ</th><th className="p-3 text-right">ดำเนินการ</th></tr></thead>
+              <thead><tr className="bg-slate-50 font-bold border-b border-slate-100 text-slate-400"><th className="p-3">Hook</th><th className="p-3">Type</th><th className="p-3"></th><th className="p-3 text-right">Action</th></tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {statsPending.pending24h.concat(statsPending.pending7d).length === 0 ? (
-                  <tr><td colSpan="4" className="p-6 text-center text-slate-400 italic">🎉 ดำเนินการอัปเดตสถิติครบหมดทุกคลิปแล้ว</td></tr>
+                  <tr><td colSpan="4" className="p-6 text-center text-slate-400 italic">🎉 อัปเดตสถิติครบทุกคลิปแล้ว</td></tr>
                 ) : (
                   statsPending.pending24h.map(c => (
-                    <tr key={c.id} className="hover:bg-slate-50/50"><td className="p-3 truncate max-w-[150px] font-medium text-slate-800">{c.hook || 'ไม่มี Hook'}</td><td className="p-3"><span className="text-[10px] bg-sky-50 text-sky-800 px-2 py-0.5 rounded-md font-semibold">24 Hours</span></td><td className="p-3"><span className="w-2.5 h-2.5 bg-amber-400 rounded-full inline-block animate-pulse" /></td><td className="p-3 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold">อัปเดตวิว</button></td></tr>
+                    <tr key={c.id} className="hover:bg-slate-50/50"><td className="p-2.5 truncate max-w-[150px] font-medium text-slate-800">{c.hook || '-'}</td><td className="p-2.5"><span className="text-[10px] bg-sky-50 text-sky-800 px-2 py-0.5 rounded-md font-semibold">24h</span></td><td className="p-2.5"><span className="w-2 h-2 bg-amber-400 rounded-full inline-block animate-pulse" /></td><td className="p-2.5 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg font-bold">อัปเดต</button></td></tr>
                   )).concat(statsPending.pending7d.map(c => (
-                    <tr key={c.id} className="hover:bg-slate-50/50"><td className="p-3 truncate max-w-[150px] font-medium text-slate-800">{c.hook || 'ไม่มี Hook'}</td><td className="p-3"><span className="text-[10px] bg-purple-50 text-[#7c3aed] px-2 py-0.5 rounded-md font-semibold">7 Days</span></td><td className="p-3"><span className="w-2.5 h-2.5 bg-purple-400 rounded-full inline-block animate-pulse" /></td><td className="p-3 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-bold">อัปเดตวิว</button></td></tr>
+                    <tr key={c.id} className="hover:bg-slate-50/50"><td className="p-2.5 truncate max-w-[150px] font-medium text-slate-800">{c.hook || '-'}</td><td className="p-2.5"><span className="text-[10px] bg-purple-50 text-[#7c3aed] px-2 py-0.5 rounded-md font-semibold">7d</span></td><td className="p-2.5"><span className="w-2 h-2 bg-purple-400 rounded-full inline-block animate-pulse" /></td><td className="p-2.5 text-right"><button onClick={() => onEditClip(c.id)} className="text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg font-bold">อัปเดต</button></td></tr>
                   )))
                 )}
               </tbody>
@@ -883,25 +1117,31 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           </div>
         </div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">Focused Products</h3><button onClick={() => onGoTo('lock')} className="text-xs font-bold text-[#012b25] hover:underline">Manage</button></div>
-          <div className="space-y-3">
-            {lockedProducts.length === 0 ? <div className="text-center py-6 text-xs text-slate-400">ยังไม่ล็อกเป้าหมาย</div> : lockedProducts.slice(0, 4).map(p => {
+          <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">Focused Products (Lock)</h3><button onClick={() => onGoTo('lock')} className="text-xs font-bold text-[#012b25] hover:underline">Manage</button></div>
+          <div className="space-y-2.5">
+            {lockedProducts.length === 0 ? <div className="text-center py-6 text-xs text-slate-400 italic">ยังไม่ Lock สินค้าในเดือนนี้</div> : lockedProducts.slice(0, 4).map(p => {
               const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === currentMonth()).length;
               const target = p.locked?.targetClips || 1;
               const catInfo = getAbcdInfo(p.category);
+              const pct = Math.min(100, Math.round(made / target * 100));
               return (
-                <div key={p.id} onClick={() => onSelectProduct(p.id)} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-100/50 transition-all">
-                  <div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-lg font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div><span className="font-display font-bold text-sm text-slate-800 truncate max-w-[160px]">{p.name || 'ไม่ระบุชื่อ'}</span></div>
-                  <span className="font-mono text-xs font-bold text-slate-600">{made}/{target} clips</span>
+                <div key={p.id} onClick={() => onSelectProduct(p.id)} className="p-3 bg-slate-50 rounded-2xl border border-slate-100 cursor-pointer hover:bg-slate-100/50 transition-all">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0"><div className={`w-7 h-7 rounded-lg font-bold text-[10px] flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div><span className="font-semibold text-xs text-slate-800 truncate">{p.name}</span></div>
+                    <span className="font-mono text-[11px] font-bold text-slate-600 flex-shrink-0">{made}/{target}</span>
+                  </div>
+                  <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct >= 100 ? 'bg-emerald-400' : pct >= 60 ? 'bg-[#d9eb54]' : 'bg-amber-400'}`} style={{ width: `${pct}%` }} /></div>
                 </div>
               );
             })}
           </div>
         </div>
       </div>
+
     </div>
   );
 }
+
 
 function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all');
