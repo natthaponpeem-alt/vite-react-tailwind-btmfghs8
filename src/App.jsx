@@ -214,6 +214,59 @@ function getTodayMission(clips, monthlyTarget) {
     status, statusLabel, statusBg, ratio };
 }
 
+// ─── UNFAIR ADVANTAGE ENGINE — Top Focus Products (Weekly Plan) ─────────────
+function getUnfairAdvantage(products, clips) {
+  if (!Array.isArray(products)) return [];
+  const ym = currentMonth();
+  return products.map(p => {
+    if (p.decision === 'DROP') return null;
+    const sales30 = getProductSales(p, clips, 30).primary || 0;
+    if (sales30 === 0 && !p.locked) return null; // ไม่มีสัญญาณเลย — ข้าม
+
+    const commission = Number(p.scorecard?.commission || 0);
+    const trend30 = Number(p.scorecard?.gmv30dPct || 0);
+    const rank = Number(p.tiktokRank) || 0;
+    const price = Number(p.price) || 0;
+    const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length;
+    const isShopAds = !!p.isShopAds;
+    const isLocked = p.locked?.month === ym;
+    const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0,7) === ym).length;
+
+    let score = 0; const breakdown = [];
+    // GMV size (0-3 pts) — calibrated to user's actual distribution
+    if (sales30 >= 30000) { score += 3; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 3, color: 'bg-emerald-100 text-emerald-800' }); }
+    else if (sales30 >= 10000) { score += 2; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 2, color: 'bg-emerald-50 text-emerald-700' }); }
+    else if (sales30 >= 3000) { score += 1; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 1, color: 'bg-slate-100 text-slate-700' }); }
+    // Commission (0-2 pts)
+    if (commission >= 20) { score += 2; breakdown.push({ label: `คอม ${commission}%`, pts: 2, color: 'bg-violet-100 text-violet-800' }); }
+    else if (commission >= 15) { score += 1; breakdown.push({ label: `คอม ${commission}%`, pts: 1, color: 'bg-violet-50 text-violet-700' }); }
+    // Momentum (0-2 pts)
+    if (trend30 >= 25) { score += 2; breakdown.push({ label: `🔥 +${trend30}%`, pts: 2, color: 'bg-rose-100 text-rose-800' }); }
+    else if (trend30 >= 10) { score += 1; breakdown.push({ label: `↗ +${trend30}%`, pts: 1, color: 'bg-rose-50 text-rose-700' }); }
+    // Winner clips (0-2 pts)
+    if (winnerCount >= 2) { score += 2; breakdown.push({ label: `🏆 ${winnerCount} winners`, pts: 2, color: 'bg-amber-100 text-amber-800' }); }
+    else if (winnerCount === 1) { score += 1; breakdown.push({ label: '🏆 1 winner', pts: 1, color: 'bg-amber-50 text-amber-700' }); }
+    // Platform endorsement (0-2 pts)
+    if (rank > 0 && rank <= 10) { score += 1; breakdown.push({ label: `Top #${rank}`, pts: 1, color: 'bg-sky-50 text-sky-700' }); }
+    if (isShopAds) { score += 1; breakdown.push({ label: '🛒 Shop Ads', pts: 1, color: 'bg-sky-100 text-sky-800' }); }
+    // Lock focus (+1) — already committed
+    if (isLocked) { score += 1; breakdown.push({ label: '🔒 Locked', pts: 1, color: 'bg-lime-100 text-[#012b25]' }); }
+
+    let tier, tierColor, recommendedClips, advice;
+    if (score >= 9) { tier = '💎 NO-BRAINER'; tierColor = 'bg-lime-400 text-[#012b25]'; recommendedClips = 6; advice = 'ลง 5-7 คลิป/สัปดาห์ — high confidence'; }
+    else if (score >= 6) { tier = '🔥 HOT'; tierColor = 'bg-rose-500 text-white'; recommendedClips = 4; advice = 'ลง 3-4 คลิป/สัปดาห์ — แตกมุมเล่า'; }
+    else if (score >= 3) { tier = '🟡 WATCH'; tierColor = 'bg-amber-400 text-amber-900'; recommendedClips = 2; advice = 'เทส 1-2 คลิป/สัปดาห์'; }
+    else { return null; } // ต่ำกว่านี้ไม่ทันแนะนำ
+
+    const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0;
+    const estOrdersPerWeek = recommendedClips * 0.6;
+    const estCommissionPerWeek = Math.round(estOrdersPerWeek * commPerOrder);
+    const remainingThisWeek = Math.max(0, recommendedClips - clipsThisMonth);
+
+    return { product: p, score, breakdown, tier, tierColor, recommendedClips, advice, estCommissionPerWeek, sales30, commission, clipsThisMonth, remainingThisWeek };
+  }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 5);
+}
+
 function getPostTodaySuggestions(products, clips) {
   if (!Array.isArray(products)) return [];
   const todayStrVal = todayStr(); const ym = currentMonth();
@@ -375,10 +428,12 @@ export default function App() {
     const settingsRef = doc(db, 'artifacts', APP_ID, 'users', user.uid, 'appData', 'settings');
     const unsubSettings = onSnapshot(settingsRef, (snap) => {
       if (snap.exists()) {
-        setAppSettings({
+        setAppSettings(prev => ({
+          ...prev,
           monthlyTarget: snap.data().monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET,
-          noticeBoard: snap.data().noticeBoard || ''
-        });
+          noticeBoard: snap.data().noticeBoard || '',
+          monthlyRevenueTarget: snap.data().monthlyRevenueTarget || MONTHLY_REVENUE_TARGET
+        }));
       }
     });
 
@@ -847,6 +902,8 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const mission = useMemo(() => getTodayMission(clips, appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET), [clips, appSettings]);
   // ─── TIER 2: What to Post Today ─────────────────────────────────────────
   const postSuggestions = useMemo(() => getPostTodaySuggestions(products, clips), [products, clips]);
+  // ─── TIER 2B: Unfair Advantage Engine (Top Focus Weekly Plan) ──────────
+  const unfairAdvantage = useMemo(() => getUnfairAdvantage(products, clips), [products, clips]);
   // ─── TIER 3: Smart Warnings ─────────────────────────────────────────────
   const warnings = useMemo(() => getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }), [concentration, hasRepeatIssue, productsNeedingRescore, mission]);
   // ─── TIER 5: Strategic KPIs (Blended commission, Portfolio balance) ──────
@@ -937,15 +994,63 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
-      {/* ─── TIER 2: WHAT TO POST TODAY ───────────────────────────────── */}
-      {postSuggestions.length > 0 && (
+      {/* ─── TIER 2: UNFAIR ADVANTAGE ENGINE (Weekly Focus Plan) ────────── */}
+      {unfairAdvantage.length > 0 && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
+            <div>
+              <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#d9eb54]" /> 💎 Unfair Advantage — Top Focus This Week
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">คัดจาก GMV + Commission + Momentum + Winners + Platform signals</p>
+            </div>
+            <span className="text-[10px] bg-[#012b25] text-[#d9eb54] font-bold px-2.5 py-1 rounded-full">{unfairAdvantage.length} แนะนำ</span>
+          </div>
+          <div className="space-y-3">
+            {unfairAdvantage.map((s, idx) => {
+              const catInfo = getAbcdInfo(s.product.category);
+              return (
+                <div key={s.product.id} className="bg-slate-50 hover:bg-slate-100 rounded-2xl transition-all border border-slate-100/60 group p-4 space-y-2.5">
+                  <div className="flex items-center gap-3">
+                    <div className="font-display text-2xl text-slate-300 w-7 text-center flex-shrink-0 group-hover:text-[#012b25] transition-colors">#{idx+1}</div>
+                    <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
+                    <div className="flex-1 min-w-0">
+                      <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${s.tierColor}`}>{s.tier}</span>
+                        <span className="text-[10px] text-slate-500 font-mono font-bold">Score {s.score}</span>
+                      </div>
+                    </div>
+                    <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1">
+                      <Plus className="w-3 h-3" /> คลิป
+                    </button>
+                  </div>
+                  {/* Score breakdown pills */}
+                  <div className="flex flex-wrap gap-1 ml-10">
+                    {s.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${b.color}`}>{b.label} <span className="opacity-60">+{b.pts}</span></span>))}
+                  </div>
+                  {/* Action plan */}
+                  <div className="ml-10 flex flex-wrap items-center gap-3 text-[10px] text-slate-600 pt-1 border-t border-slate-100">
+                    <div className="flex items-center gap-1"><Target className="w-3 h-3 text-emerald-700" /><span className="font-bold">{s.recommendedClips} คลิป/wk</span> <span className="text-slate-400">(ลงไป {s.clipsThisMonth} แล้ว)</span></div>
+                    {s.estCommissionPerWeek > 0 && (<div className="flex items-center gap-1"><DollarSign className="w-3 h-3 text-violet-600" /><span className="font-bold">~฿{fmtNum(s.estCommissionPerWeek)} comm/wk</span></div>)}
+                    <div className="text-slate-400 italic">{s.advice}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TIER 2 fallback: simple Post Today (only if no Unfair Advantage) ─ */}
+      {unfairAdvantage.length === 0 && postSuggestions.length > 0 && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
           <div className="flex items-center justify-between mb-5">
             <div>
               <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-emerald-700" /> ลงสินค้าอะไรวันนี้
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">คัดจาก Lock List + GMV momentum + ความว่างเว้น</p>
+              <p className="text-xs text-slate-400 mt-0.5">ยังไม่มีสินค้าเข้าเกณฑ์ Unfair Advantage — แสดงรายการพื้นฐาน</p>
             </div>
             <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-full">{postSuggestions.length} แนะนำ</span>
           </div>
@@ -1347,8 +1452,9 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                     <p className="text-xs text-slate-400 mt-1 truncate">{p.brand || 'No brand'}</p>
                   </div>
                   
-                  <div className="mt-4 flex items-center gap-4 text-xs font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="mt-4 flex items-center gap-3 text-xs font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                     <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Comm.</span><span className="font-bold text-violet-700">{comm > 0 ? `${comm}%` : '-'}</span></div>
+                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">GMV เดือนนี้</span><span className="font-bold text-[#012b25]">฿{fmtNum(Number(p.salesData?.monthly?.[currentMonth()]) || 0)}</span></div>
                     <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Trend 30d</span><span className={`font-bold ${hasTrend ? (trendIsUp ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-600'}`}>{hasTrend ? `${trendIsUp ? '+' : ''}${rawTrend}%` : '-'}</span></div>
                   </div>
 
@@ -1368,7 +1474,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
         ) : (
           <div className="overflow-x-auto pt-2">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
-              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4 text-center">Comm %</th><th className="p-4 text-center">Trend 30d</th><th className="p-4 text-center">Score</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
+              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4 text-center">Comm %</th><th className="p-4 text-right">GMV (เดือนนี้)</th><th className="p-4 text-center">Trend 30d</th><th className="p-4 text-center">Score</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map(p => {
                   const clipCount = clips.filter(c => c.productId === p.id).length; const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category);
@@ -1395,6 +1501,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                       <td className="p-4 font-mono font-bold text-slate-700">{clipCount}</td>
                       <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
                       <td className="p-4 text-center font-mono font-bold text-violet-700 bg-violet-50/30 rounded-lg">{comm > 0 ? `${comm}%` : '-'}</td>
+                      <td className="p-4 text-right font-mono font-bold text-[#012b25]">฿{fmtNum(Number(p.salesData?.monthly?.[currentMonth()]) || 0)}</td>
                       <td className="p-4 text-center font-mono font-bold">
                         {hasTrend ? (
                           <span className={`flex items-center justify-center gap-1 ${trendIsUp ? 'text-emerald-600' : 'text-rose-600'}`}>
@@ -1479,6 +1586,60 @@ function ProductDetailPage({ product, clips, allClips, onBack, onTogglePillar, o
       </div>
 
       <SplitterSection product={product} />
+
+      {/* Monthly Breakdown — 6-month GMV history */}
+      {(() => {
+        const ledger = product.salesData?.monthly || {};
+        const clipMonthly = {};
+        clips.forEach(c => { const ym = c.postedAt?.slice(0,7); if (ym) clipMonthly[ym] = (clipMonthly[ym] || 0) + (Number(c.gmv) || 0); });
+        const now = new Date();
+        const months = [];
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          const ledgerVal = Number(ledger[key]) || 0;
+          const clipVal = Number(clipMonthly[key]) || 0;
+          months.push({ key, value: Math.max(ledgerVal, clipVal), label: d.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' }), ledger: ledgerVal, fromClips: clipVal });
+        }
+        const max = Math.max(...months.map(m => m.value), 1);
+        const total = months.reduce((s, m) => s + m.value, 0);
+        const hasAnyData = total > 0;
+        const currentKey = currentMonth();
+        return (
+          <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-700" /> GMV Monthly Breakdown</h3>
+                <p className="text-xs text-slate-400 mt-0.5">6 เดือนล่าสุด · Max(จาก Radar Sync, จาก Clip GMV)</p>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Total 6mo</div>
+                <div className="font-display text-lg text-[#012b25]">฿{fmtNum(total)}</div>
+              </div>
+            </div>
+            {!hasAnyData ? (
+              <div className="text-center py-8 text-xs text-slate-400 italic">ยังไม่มีประวัติยอดขาย — อัพข้อมูลผ่าน Radar หรือใส่ GMV ในคลิป</div>
+            ) : (
+              <div className="space-y-2">
+                {months.map(m => {
+                  const pct = Math.round(m.value / max * 100);
+                  const isCurrent = m.key === currentKey;
+                  return (
+                    <div key={m.key} className="flex items-center gap-3">
+                      <div className={`text-[10px] font-bold w-12 text-right font-mono ${isCurrent ? 'text-[#012b25]' : 'text-slate-500'}`}>{m.label}</div>
+                      <div className="flex-1 h-7 bg-slate-100 rounded-lg overflow-hidden relative">
+                        <div className={`h-full rounded-lg transition-all ${isCurrent ? 'bg-[#d9eb54]' : 'bg-[#012b25]'}`} style={{ width: `${Math.max(pct, m.value > 0 ? 2 : 0)}%` }} />
+                        {m.value > 0 && (<div className={`absolute inset-y-0 right-2 flex items-center text-[10px] font-bold ${pct > 60 ? 'text-white' : 'text-[#012b25]'} font-mono`} style={pct > 60 ? {} : { left: `${Math.max(pct + 2, 5)}%`, right: 'auto' }}>฿{fmtNum(m.value)}</div>)}
+                      </div>
+                      {isCurrent && <span className="text-[9px] bg-lime-100 text-[#012b25] font-bold px-1.5 py-0.5 rounded-md">THIS MONTH</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between"><h3 className="font-display text-base text-[#012b25]">🎬 คลิปสะสมที่ผูกกับสินค้านี้ ({clips.length})</h3><button onClick={onAddClip} className="bg-[#bcd924] text-[#0d2a23] font-bold text-xs px-4 py-2.5 rounded-full shadow-sm hover:bg-[#a9c41d] transition-all">+ Add Clip</button></div>
