@@ -2219,7 +2219,11 @@ function AddClipModal({ products, defaultProductId, onClose, onSave, showToast }
 
   const handleSave = () => { 
     if (!isV && !productId) return showToast('กรุณาเลือกสินค้าที่เชื่อมโยง', 'error'); 
-    onSave({ isV, productId: isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted, commStatus }); 
+    // Build posted timestamp with current time (avoids UTC midnight → 07:00 bug)
+    const now = new Date();
+    const [y, m, d] = postedAt.split('-').map(Number);
+    const postedDate = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+    onSave({ isV, productId: isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: postedDate.toISOString(), videoLink, gencodeSubmitted, commStatus }); 
     onClose();
   };
   return (<Modal title="🎬 เพิ่มประวัติการลงคลิป" onClose={onClose} size="lg" footer={<button onClick={handleSave} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2"><Plus className="w-4 h-4"/> บันทึกข้อมูลคลิปลงระบบ</button>}>
@@ -2247,7 +2251,19 @@ function EditClipModal({ clip, products, onClose, onSave, onDelete }) {
   const [commStatus, setCommStatus] = useState(clip?.commStatus || 'pending');
   
   if (!clip) return null; const selectedProduct = products.find(p => p.id === productId);
-  const handleSave = () => { onSave({ productId: clip.isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: new Date(postedAt).toISOString(), videoLink, gencodeSubmitted, views24h: views24h === '' ? null : Number(views24h), views7d: views7d === '' ? null : Number(views7d), orders: orders === '' ? null : Number(orders), gmv: gmv === '' ? null : Number(gmv), ctr: ctr === '' ? null : Number(ctr), note, commStatus }); onClose(); };
+  const handleSave = () => {
+    // Preserve original time if date didn't change; else attach current time to new date
+    let postedISO;
+    if (clip.postedAt && clip.postedAt.slice(0, 10) === postedAt) {
+      postedISO = clip.postedAt;
+    } else {
+      const now = new Date();
+      const [y, m, d] = postedAt.split('-').map(Number);
+      postedISO = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
+    }
+    onSave({ productId: clip.isV ? null : productId, pillarId, painId, angleId, hook, level, postedAt: postedISO, videoLink, gencodeSubmitted, views24h: views24h === '' ? null : Number(views24h), views7d: views7d === '' ? null : Number(views7d), orders: orders === '' ? null : Number(orders), gmv: gmv === '' ? null : Number(gmv), ctr: ctr === '' ? null : Number(ctr), note, commStatus });
+    onClose();
+  };
   
   return (<Modal title="✏️ แก้ไขข้อมูล & อัปเดตสถิติคลิป" onClose={onClose} size="xl" footer={<div className="flex gap-3"><button onClick={() => { onDelete(); onClose(); }} className="px-5 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-100 rounded-2xl py-4 transition-colors">🗑️ ลบถาวร</button><button onClick={handleSave} className="flex-1 bg-[#012b25] text-white hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2"><Edit3 className="w-4 h-4"/> อัปเดตสถิติคลิป</button></div>}>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-4"><h3 className="font-display text-sm text-[#012b25] border-b border-slate-100 pb-2 flex items-center gap-2"><FileText className="w-4 h-4"/> ข้อมูลตั้งต้น</h3>{!clip.isV && (<FormField label="ผูกสินค้า"><select value={productId} onChange={e => setProductId(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200`}><option value="">-- เลือก --</option>{products.map(p => <option key={p.id} value={p.id}>{ABCD_INFO[p.category]?.short || '?'} — {p.name}</option>)}</select></FormField>)}<div className="grid grid-cols-2 gap-3"><FormField label="Pillar"><select value={pillarId} onChange={e => setPillarId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{DEFAULT_PILLARS.map(p => <option key={p.id} value={p.id}>{p.id}</option>)}</select></FormField><FormField label="วันที่ลง"><input type="date" value={postedAt} onChange={e => setPostedAt(e.target.value)} className={`${inputStyles} bg-white border-slate-200 font-mono`} /></FormField></div>{selectedProduct && !clip.isV && (<div className="grid grid-cols-2 gap-3"><FormField label="Pain"><select value={painId} onChange={e => setPainId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{selectedProduct.pains?.map(p => <option key={p.id} value={p.id}>{p.text.slice(0, 30)}</option>)}</select></FormField><FormField label="Angle"><select value={angleId} onChange={e => setAngleId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">-</option>{selectedProduct.angles?.map(a => <option key={a.id} value={a.id}>{a.text.slice(0, 30)}</option>)}</select></FormField></div>)}<FormField label="Hook"><input value={hook} onChange={e => setHook(e.target.value)} className={`${inputStyles} bg-white border-slate-200 font-medium`} /></FormField><FormField label="ระดับเป้าหมายคลิป"><div className="grid grid-cols-3 gap-2">{CLIP_LEVELS.map(l => (<button key={l.id} onClick={() => setLevel(l.id)} className={`text-[10px] font-bold uppercase tracking-wider py-2.5 rounded-xl transition-all ${level === l.id ? l.color + ' text-white shadow-md' : 'bg-white border border-slate-200 text-slate-500'}`}>{l.label}</button>))}</div></FormField><div className="grid grid-cols-3 gap-3 items-end"><div className="col-span-2"><FormField label="Video Link"><input value={videoLink} onChange={e => setVideoLink(e.target.value)} className={`${inputStyles} bg-white border-slate-200`} /></FormField></div><div className="mb-4"><label className={`flex items-center justify-center gap-2 cursor-pointer py-3.5 px-2 rounded-xl transition-all border ${gencodeSubmitted ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}><input type="checkbox" checked={gencodeSubmitted} onChange={e => setGencodeSubmitted(e.target.checked)} className="w-4 h-4 accent-emerald-600 rounded" /><span className={`text-[11px] font-bold ${gencodeSubmitted ? 'text-emerald-800' : 'text-slate-500'}`}>GC ✓</span></label></div></div></div><div className="space-y-4"><h3 className="font-display text-sm text-[#012b25] border-b border-slate-100 pb-2 flex items-center gap-2"><BarChart3 className="w-4 h-4"/> สถิติผลลัพธ์ (Performance)</h3><div className="bg-gradient-to-br from-blue-50/50 to-white p-5 rounded-3xl border border-blue-100 space-y-4 shadow-sm"><div className="grid grid-cols-2 gap-4"><FormField label="Views 24 ชม."><input type="number" value={views24h} onChange={e => setViews24h(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono`} /></FormField><FormField label="Views 7 วัน"><input type="number" value={views7d} onChange={e => setViews7d(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono font-bold`} /></FormField></div><div className="grid grid-cols-2 gap-4 border-t border-blue-50 pt-4"><FormField label="จำนวนออเดอร์"><input type="number" value={orders} onChange={e => setOrders(e.target.value)} className={`${inputStyles} bg-white border-emerald-50 font-mono text-emerald-700`} /></FormField><FormField label="GMV ฿ (ยอดขาย)"><input type="number" value={gmv} onChange={e => setGmv(e.target.value)} className={`${inputStyles} bg-white border-emerald-100 font-mono font-bold text-xl text-emerald-700`} /></FormField></div><div className="grid grid-cols-2 gap-4"><FormField label="CTR % (อัตราคลิก)"><input type="number" step="0.1" value={ctr} onChange={e => setCtr(e.target.value)} className={`${inputStyles} bg-white border-blue-50 font-mono`} /></FormField><FormField label="สถานะเงิน (Financial)"><select value={commStatus} onChange={e => setCommStatus(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200 font-bold ${commStatus === 'paid' ? 'text-emerald-700' : commStatus === 'failed' ? 'text-rose-700' : 'text-amber-600'}`}><option value="pending">⏳ รอโอน (Pending)</option><option value="paid">✅ เงินเข้าแล้ว (Paid)</option><option value="failed">❌ ยกเลิก/คืนเงิน</option></select></FormField></div></div><FormField label="Note บันทึกความจำ"><textarea value={note} onChange={e => setNote(e.target.value)} rows={3} className={`${inputStyles} resize-none bg-white border-slate-200`} placeholder="เช่น 'คลิปนี้ปังมากเพราะใช้เสียง AI แนวสืบสวน...'" /></FormField></div></div>
@@ -2287,6 +2303,7 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
   const [isProcessing, setIsProcessing] = useState(false);
   
   const [selectedMonth, setSelectedMonth] = useState(currentMonth()); 
+  const [syncMode, setSyncMode] = useState('add'); // 'add' | 'replace'
 
   const monthOptions = useMemo(() => {
     const opts = []; const now = new Date();
@@ -2393,9 +2410,16 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
       const salesData = p.salesData || {};
       
       const monthlyRecord = salesData.monthly || {};
-      monthlyRecord[selectedMonth] = (monthlyRecord[selectedMonth] || 0) + item.totalGmv;
       const isCurrentMonth = selectedMonth === currentMonth();
-      const new30d = isCurrentMonth ? (Number(salesData.last30d) || 0) + item.totalGmv : salesData.last30d;
+      
+      // ADD: เพิ่มยอดเข้ายอดเดิม (default — สะสมต่อ)
+      // REPLACE: แทนยอดเดิม (safer ตอนอัพซ้ำ — ป้องกัน double-count)
+      if (syncMode === 'replace') {
+        monthlyRecord[selectedMonth] = item.totalGmv;
+      } else {
+        monthlyRecord[selectedMonth] = (monthlyRecord[selectedMonth] || 0) + item.totalGmv;
+      }
+      const new30d = isCurrentMonth ? (syncMode === 'replace' ? item.totalGmv : (Number(salesData.last30d) || 0) + item.totalGmv) : salesData.last30d;
 
       const newIsShopAds = p.isShopAds || item.isShopAds;
       const newGmvMax = Math.max(Number(p.gmvMaxPct) || 0, item.gmvMaxPct);
@@ -2461,6 +2485,36 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
               {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </div>
+
+          {/* Sync Mode Toggle — ADD vs REPLACE */}
+          <div className="bg-white border border-[#e9eceb] p-4 rounded-2xl shadow-sm space-y-3">
+            <div>
+              <div className="text-sm font-bold text-[#012b25] mb-1">โหมดการ Sync ยอดขาย</div>
+              <div className="text-[10px] text-slate-500">เลือกให้เหมาะกับสถานการณ์ — กันยอด double-count</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setSyncMode('add')} className={`p-3 rounded-xl border text-left transition-all ${syncMode === 'add' ? 'bg-[#012b25] text-white border-[#012b25] shadow-md' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Plus className={`w-3.5 h-3.5 ${syncMode === 'add' ? 'text-[#d9eb54]' : 'text-slate-500'}`} />
+                  <span className="font-bold text-xs">ADD (เพิ่มเข้ายอดเดิม)</span>
+                </div>
+                <div className={`text-[10px] leading-tight ${syncMode === 'add' ? 'text-emerald-200' : 'text-slate-500'}`}>เดือนนั้นยังไม่เคยอัพ / อัพข้อมูล delta ใหม่</div>
+              </button>
+              <button onClick={() => setSyncMode('replace')} className={`p-3 rounded-xl border text-left transition-all ${syncMode === 'replace' ? 'bg-amber-500 text-white border-amber-600 shadow-md' : 'bg-slate-50 border-slate-200 hover:bg-amber-50'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncMode === 'replace' ? 'text-white' : 'text-amber-600'}`} />
+                  <span className="font-bold text-xs">REPLACE (แทนยอดเดิม)</span>
+                </div>
+                <div className={`text-[10px] leading-tight ${syncMode === 'replace' ? 'text-amber-50' : 'text-slate-500'}`}>อัพเดือนเดิมซ้ำ — กัน double-count</div>
+              </button>
+            </div>
+            {syncMode === 'replace' && (
+              <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl text-[10px] text-amber-800 flex items-start gap-1.5">
+                <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                <span><strong>โหมด REPLACE:</strong> ยอด {selectedMonth} เดิมจะถูก <strong>แทนที่</strong> ด้วยยอดใหม่ทั้งหมด — ใช้ตอนอัพ TikTok Export ของเดือนเดียวกันซ้ำเท่านั้น</span>
+              </div>
+            )}
+          </div>
           <div className="bg-sky-50 border border-sky-100 p-4 rounded-2xl text-xs text-sky-800 leading-relaxed shadow-sm">
             <strong>วิธีใช้งาน:</strong> เปิดหน้าคำสั่งซื้อในแอป TikTok Affiliate &gt; กด Export ข้อมูล &gt; เปิดไฟล์ Excel แล้ว <strong>Copy ข้อมูลตารางมาวาง (Paste) ในช่องด้านล่างนี้ได้เลย</strong> (ระบบจะดูดค่าคอม และ %โฆษณาร้านค้า ให้อัตโนมัติ)
           </div>
@@ -2468,9 +2522,12 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
+          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between flex-wrap gap-2">
             <div className="text-xs font-bold text-slate-700">กำลังอัปเดตสมุดบัญชียอดขายของเดือน: <span className="text-[#012b25] bg-[#d9eb54] px-2 py-0.5 rounded-md ml-1">{selectedMonth}</span></div>
-            {selectedMonth !== currentMonth() && <div className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md">⚠️ บันทึกย้อนหลัง (ไม่กระทบยอด 30 วันปัจจุบัน)</div>}
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${syncMode === 'replace' ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}`}>{syncMode === 'replace' ? '🔄 REPLACE mode' : '➕ ADD mode'}</span>
+              {selectedMonth !== currentMonth() && <div className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md">⚠️ ย้อนหลัง (ไม่กระทบ 30d)</div>}
+            </div>
           </div>
           <div>
             <h3 className="font-display text-base text-[#012b25] mb-3 flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-500" /> 🟢 ตรงกันกับในคลัง (Auto-Sync) - {parsedData.matched.length} รายการ</h3>
