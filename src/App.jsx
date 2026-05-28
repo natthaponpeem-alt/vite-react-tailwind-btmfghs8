@@ -1525,7 +1525,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                   
                   <div className="mt-4 flex items-center gap-3 text-xs font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                     <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Comm.</span><span className="font-bold text-violet-700">{comm > 0 ? `${comm}%` : '-'}</span></div>
-                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">GMV เดือนนี้</span><span className="font-bold text-[#012b25]">฿{fmtNum(Number(p.salesData?.monthly?.[currentMonth()]) || 0)}</span></div>
+                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">GMV {getRecentGMV(p).fromLastMonth ? 'เดือนก่อน' : 'ล่าสุด'}</span><span className="font-bold text-[#012b25]">฿{fmtNum(getRecentGMV(p).best)}</span></div>
                     <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Trend 30d</span><span className={`font-bold ${hasTrend ? (trendIsUp ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-600'}`}>{hasTrend ? `${trendIsUp ? '+' : ''}${rawTrend}%` : '-'}</span></div>
                   </div>
 
@@ -1545,7 +1545,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
         ) : (
           <div className="overflow-x-auto pt-2">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
-              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4 text-center">Comm %</th><th className="p-4 text-right">GMV (เดือนนี้)</th><th className="p-4 text-center">Trend 30d</th><th className="p-4 text-center">Score</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
+              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4 text-center">Comm %</th><th className="p-4 text-right">GMV (ล่าสุด)</th><th className="p-4 text-center">Trend 30d</th><th className="p-4 text-center">Score</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map(p => {
                   const clipCount = clips.filter(c => c.productId === p.id).length; const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category);
@@ -1572,7 +1572,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                       <td className="p-4 font-mono font-bold text-slate-700">{clipCount}</td>
                       <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
                       <td className="p-4 text-center font-mono font-bold text-violet-700 bg-violet-50/30 rounded-lg">{comm > 0 ? `${comm}%` : '-'}</td>
-                      <td className="p-4 text-right font-mono font-bold text-[#012b25]">฿{fmtNum(Number(p.salesData?.monthly?.[currentMonth()]) || 0)}</td>
+                      <td className="p-4 text-right font-mono font-bold text-[#012b25]">{(() => { const rg = getRecentGMV(p); return (<span>฿{fmtNum(rg.best)}{rg.fromLastMonth && <span className="block text-[9px] text-amber-600 font-sans font-normal">เดือนก่อน</span>}</span>); })()}</td>
                       <td className="p-4 text-center font-mono font-bold">
                         {hasTrend ? (
                           <span className={`flex items-center justify-center gap-1 ${trendIsUp ? 'text-emerald-600' : 'text-rose-600'}`}>
