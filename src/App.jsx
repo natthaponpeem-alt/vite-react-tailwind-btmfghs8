@@ -1478,6 +1478,13 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
   
   const [viewMode, setViewMode] = useState(() => { try { return localStorage.getItem('peem6pack_viewMode') || 'box'; } catch { return 'box'; } });
   useEffect(() => { try { localStorage.setItem('peem6pack_viewMode', viewMode); } catch {} }, [viewMode]);
+  const [gmvMonth, setGmvMonth] = useState(currentMonth());
+  const monthOptions = useMemo(() => {
+    const opts = []; const now = new Date();
+    for (let i = 0; i < 6; i++) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); opts.push({ value: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' }) }); }
+    return opts;
+  }, []);
+  const monthGMV = (p) => Number(p?.salesData?.monthly?.[gmvMonth]) || 0;
 
   const filtered = useMemo(() => {
     let list = products.filter(p => {
@@ -1490,26 +1497,26 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
       if (filter === 'stale' && !isStale) return false;
       if (['PICK', 'WAIT', 'DROP'].includes(filter.toUpperCase()) && p.decision?.toUpperCase() !== filter.toUpperCase()) return false;
       if (filter === 'locked' && !p.locked) return false;
-      if (filter === 'selling' && getRecentGMV(p).best <= 0) return false;
+      if (filter === 'selling' && monthGMV(p) <= 0) return false;
       if (['A', 'B', 'C', 'D'].includes(filter) && p.category !== filter) return false;
       if (typeFilter !== 'all' && p.productType !== typeFilter) return false;
       return true;
     });
     
     if (sortBy === 'score') list.sort((a, b) => (b.scorePct || 0) - (a.scorePct || 0));
-    else if (sortBy === 'gmv') list.sort((a, b) => getRecentGMV(b).best - getRecentGMV(a).best);
-    else if (sortBy === 'estcomm') list.sort((a, b) => (getRecentGMV(b).best * (Number(b.scorecard?.commission)||0)) - (getRecentGMV(a).best * (Number(a.scorecard?.commission)||0)));
+    else if (sortBy === 'gmv') list.sort((a, b) => monthGMV(b) - monthGMV(a));
+    else if (sortBy === 'estcomm') list.sort((a, b) => (monthGMV(b) * (Number(b.scorecard?.commission)||0)) - (monthGMV(a) * (Number(a.scorecard?.commission)||0)));
     else if (sortBy === 'rescore') list.sort((a, b) => daysSince(b.lastScoredAt || 0) - daysSince(a.lastScoredAt || 0));
     else if (sortBy === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
     else if (sortBy === 'created') list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return list;
-  }, [products, search, filter, typeFilter, sortBy]);
+  }, [products, search, filter, typeFilter, sortBy, gmvMonth]);
 
   const pendingProducts = products.filter(p => !p.lastScoredAt);
   const staleProducts = products.filter(p => p.lastScoredAt && daysSince(p.lastScoredAt) >= RESCORE_DAYS);
   const scoredProducts = products.filter(p => !!p.lastScoredAt);
   const dropProducts = products.filter(p => p.decision === 'DROP');
-  const sellingCount = products.filter(p => getRecentGMV(p).best > 0).length;
+  const sellingCount = products.filter(p => monthGMV(p) > 0).length;
 
   return (
     <div className="space-y-6">
@@ -1531,7 +1538,8 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
           </div>
         </div>
         <div className="flex items-center justify-between pt-1 border-t border-slate-50 text-slate-500">
-          <div className="flex items-center gap-1 text-xs font-bold"><ArrowUpDown className="w-3.5 h-3.5 text-slate-400" /><select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="bg-transparent border-none text-xs focus:ring-0 p-0 text-slate-600 font-bold"><option value="score">คะแนน (สูง-ต่ำ)</option><option value="gmv">💰 GMV (สูง-ต่ำ)</option><option value="estcomm">💵 คอมที่ได้ (สูง-ต่ำ)</option><option value="rescore">Stale (เก่า-ใหม่)</option><option value="name">ชื่อ A-Z</option><option value="created">เพิ่มล่าสุด</option></select><span className="text-[10px] text-slate-400 ml-1">พบ {filtered.length} รายการ</span></div>
+          <div className="flex items-center gap-1 text-xs font-bold"><CalendarDays className="w-3.5 h-3.5 text-slate-400" /><select value={gmvMonth} onChange={e=>setGmvMonth(e.target.value)} className="bg-transparent border-none text-xs focus:ring-0 p-0 text-emerald-700 font-bold">{monthOptions.map(m => <option key={m.value} value={m.value}>GMV {m.label}</option>)}</select></div>
+            <div className="flex items-center gap-1 text-xs font-bold"><ArrowUpDown className="w-3.5 h-3.5 text-slate-400" /><select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="bg-transparent border-none text-xs focus:ring-0 p-0 text-slate-600 font-bold"><option value="score">คะแนน (สูง-ต่ำ)</option><option value="gmv">💰 GMV (สูง-ต่ำ)</option><option value="estcomm">💵 คอมที่ได้ (สูง-ต่ำ)</option><option value="rescore">Stale (เก่า-ใหม่)</option><option value="name">ชื่อ A-Z</option><option value="created">เพิ่มล่าสุด</option></select><span className="text-[10px] text-slate-400 ml-1">พบ {filtered.length} รายการ</span></div>
           <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200/50"><button onClick={() => setViewMode('box')} className={`p-1 rounded-md transition-all ${viewMode === 'box' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><LayoutGrid className="w-3.5 h-3.5" /></button><button onClick={() => setViewMode('list')} className={`p-1 rounded-md transition-all ${viewMode === 'list' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><List className="w-3.5 h-3.5" /></button></div>
         </div>
 
@@ -1563,7 +1571,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                   
                   <div className="mt-4 flex items-center gap-3 text-xs font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                     <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Comm.</span><span className="font-bold text-violet-700">{comm > 0 ? `${comm}%` : '-'}</span></div>
-                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">GMV {getRecentGMV(p).fromLastMonth ? 'เดือนก่อน' : 'ล่าสุด'}</span><span className="font-bold text-[#012b25]">฿{fmtNum(getRecentGMV(p).best)}</span></div>
+                    <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">GMV {monthOptions.find(m=>m.value===gmvMonth)?.label || gmvMonth}</span><span className="font-bold text-[#012b25]">฿{fmtNum(monthGMV(p))}</span></div>
                     <div className="flex flex-col"><span className="text-slate-400 text-[9px] uppercase font-bold tracking-wider">Trend 30d</span><span className={`font-bold ${hasTrend ? (trendIsUp ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-600'}`}>{hasTrend ? `${trendIsUp ? '+' : ''}${rawTrend}%` : '-'}</span></div>
                   </div>
 
@@ -1583,7 +1591,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
         ) : (
           <div className="overflow-x-auto pt-2">
             <table className="w-full text-left text-xs text-slate-600 border-collapse">
-              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4 text-center">Comm %</th><th className="p-4 text-right">GMV (ล่าสุด)</th><th className="p-4 text-center">Trend 30d</th><th className="p-4 text-center">Score</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
+              <thead><tr className="bg-slate-50/80 font-bold text-slate-400 border-b border-slate-100 uppercase text-[10px] tracking-wider"><th className="p-4">Name</th><th className="p-4">Clips</th><th className="p-4">Price</th><th className="p-4 text-center">Comm %</th><th className="p-4 text-right">GMV (เลือกเดือน)</th><th className="p-4 text-center">Trend 30d</th><th className="p-4 text-center">Score</th><th className="p-4">Decision</th><th className="p-4 text-right">Actions</th></tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map(p => {
                   const clipCount = clips.filter(c => c.productId === p.id).length; const dec = getDecisionInfo(p.decision); const catInfo = getAbcdInfo(p.category);
@@ -1610,7 +1618,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                       <td className="p-4 font-mono font-bold text-slate-700">{clipCount}</td>
                       <td className="p-4 font-mono font-bold text-emerald-800">฿{fmtNum(p.price)}</td>
                       <td className="p-4 text-center font-mono font-bold text-violet-700 bg-violet-50/30 rounded-lg">{comm > 0 ? `${comm}%` : '-'}</td>
-                      <td className="p-4 text-right font-mono font-bold text-[#012b25]">{(() => { const rg = getRecentGMV(p); return (<span>฿{fmtNum(rg.best)}{rg.fromLastMonth && <span className="block text-[9px] text-amber-600 font-sans font-normal">เดือนก่อน</span>}</span>); })()}</td>
+                      <td className="p-4 text-right font-mono font-bold text-[#012b25]">฿{fmtNum(monthGMV(p))}</td>
                       <td className="p-4 text-center font-mono font-bold">
                         {hasTrend ? (
                           <span className={`flex items-center justify-center gap-1 ${trendIsUp ? 'text-emerald-600' : 'text-rose-600'}`}>
