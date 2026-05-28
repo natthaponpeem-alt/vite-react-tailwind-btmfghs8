@@ -214,57 +214,71 @@ function getTodayMission(clips, monthlyTarget) {
     status, statusLabel, statusBg, ratio };
 }
 
-// ─── UNFAIR ADVANTAGE ENGINE — Top Focus Products (Weekly Plan) ─────────────
+// ─── UNFAIR ADVANTAGE ENGINE — Commitment (Locked) + Discovery (Weekly) ─────
+function scoreUnfairProduct(p, clips, ym) {
+  const sales30 = getProductSales(p, clips, 30).primary || 0;
+  const commission = Number(p.scorecard?.commission || 0);
+  const trend30 = Number(p.scorecard?.gmv30dPct || 0);
+  const rank = Number(p.tiktokRank) || 0;
+  const price = Number(p.price) || 0;
+  const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length;
+  const isShopAds = !!p.isShopAds;
+  const isLocked = p.locked?.month === ym;
+  const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0,7) === ym).length;
+
+  let score = 0; const breakdown = [];
+  if (sales30 >= 30000) { score += 3; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 3, color: 'bg-emerald-100 text-emerald-800' }); }
+  else if (sales30 >= 10000) { score += 2; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 2, color: 'bg-emerald-50 text-emerald-700' }); }
+  else if (sales30 >= 3000) { score += 1; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 1, color: 'bg-slate-100 text-slate-700' }); }
+  if (commission >= 20) { score += 2; breakdown.push({ label: `คอม ${commission}%`, pts: 2, color: 'bg-violet-100 text-violet-800' }); }
+  else if (commission >= 15) { score += 1; breakdown.push({ label: `คอม ${commission}%`, pts: 1, color: 'bg-violet-50 text-violet-700' }); }
+  if (trend30 >= 25) { score += 2; breakdown.push({ label: `🔥 +${trend30}%`, pts: 2, color: 'bg-rose-100 text-rose-800' }); }
+  else if (trend30 >= 10) { score += 1; breakdown.push({ label: `↗ +${trend30}%`, pts: 1, color: 'bg-rose-50 text-rose-700' }); }
+  if (winnerCount >= 2) { score += 2; breakdown.push({ label: `🏆 ${winnerCount} winners`, pts: 2, color: 'bg-amber-100 text-amber-800' }); }
+  else if (winnerCount === 1) { score += 1; breakdown.push({ label: '🏆 1 winner', pts: 1, color: 'bg-amber-50 text-amber-700' }); }
+  if (rank > 0 && rank <= 10) { score += 1; breakdown.push({ label: `Top #${rank}`, pts: 1, color: 'bg-sky-50 text-sky-700' }); }
+  if (isShopAds) { score += 1; breakdown.push({ label: '🛒 Shop Ads', pts: 1, color: 'bg-sky-100 text-sky-800' }); }
+  if (isLocked) { score += 1; breakdown.push({ label: '🔒 Locked', pts: 1, color: 'bg-lime-100 text-[#012b25]' }); }
+
+  let tier, tierColor, recommendedClips, advice;
+  if (score >= 9) { tier = '💎 NO-BRAINER'; tierColor = 'bg-lime-400 text-[#012b25]'; recommendedClips = 6; advice = 'ลง 5-7 คลิป/สัปดาห์ — high confidence'; }
+  else if (score >= 6) { tier = '🔥 HOT'; tierColor = 'bg-rose-500 text-white'; recommendedClips = 4; advice = 'ลง 3-4 คลิป/สัปดาห์ — แตกมุมเล่า'; }
+  else if (score >= 3) { tier = '🟡 WATCH'; tierColor = 'bg-amber-400 text-amber-900'; recommendedClips = 2; advice = 'เทส 1-2 คลิป/สัปดาห์'; }
+  else { tier = '🔵 SPARK'; tierColor = 'bg-slate-200 text-slate-600'; recommendedClips = 1; advice = 'มีสัญญาณเริ่มต้น'; }
+
+  const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0;
+  const estCommissionPerWeek = Math.round((recommendedClips * 0.6) * commPerOrder);
+  return { product: p, score, breakdown, tier, tierColor, recommendedClips, advice, estCommissionPerWeek, sales30, commission, clipsThisMonth };
+}
+
 function getUnfairAdvantage(products, clips) {
-  if (!Array.isArray(products)) return [];
+  if (!Array.isArray(products)) return { locked: [], discovery: [] };
   const ym = currentMonth();
-  return products.map(p => {
-    if (p.decision === 'DROP') return null;
-    const sales30 = getProductSales(p, clips, 30).primary || 0;
-    if (sales30 === 0 && !p.locked) return null; // ไม่มีสัญญาณเลย — ข้าม
 
-    const commission = Number(p.scorecard?.commission || 0);
-    const trend30 = Number(p.scorecard?.gmv30dPct || 0);
-    const rank = Number(p.tiktokRank) || 0;
-    const price = Number(p.price) || 0;
-    const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length;
-    const isShopAds = !!p.isShopAds;
-    const isLocked = p.locked?.month === ym;
-    const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0,7) === ym).length;
+  // 1. COMMITMENTS — ทุกตัวที่ Lock เดือนนี้ (แสดงครบ ไม่ cap) เรียงตาม behind มากสุด
+  const locked = products
+    .filter(p => p.locked?.month === ym && p.decision !== 'DROP')
+    .map(p => {
+      const base = scoreUnfairProduct(p, clips, ym);
+      const target = p.locked.targetClips || 10;
+      const done = base.clipsThisMonth;
+      const behind = Math.max(0, target - done);
+      const pct = target > 0 ? Math.round(done / target * 100) : 0;
+      const lockStatus = done >= target ? 'done' : done === 0 ? 'notStarted' : behind > target * 0.5 ? 'behind' : 'onTrack';
+      return { ...base, target, done, behind, pct, lockStatus };
+    })
+    .sort((a, b) => b.behind - a.behind);
 
-    let score = 0; const breakdown = [];
-    // GMV size (0-3 pts) — calibrated to user's actual distribution
-    if (sales30 >= 30000) { score += 3; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 3, color: 'bg-emerald-100 text-emerald-800' }); }
-    else if (sales30 >= 10000) { score += 2; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 2, color: 'bg-emerald-50 text-emerald-700' }); }
-    else if (sales30 >= 3000) { score += 1; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 1, color: 'bg-slate-100 text-slate-700' }); }
-    // Commission (0-2 pts)
-    if (commission >= 20) { score += 2; breakdown.push({ label: `คอม ${commission}%`, pts: 2, color: 'bg-violet-100 text-violet-800' }); }
-    else if (commission >= 15) { score += 1; breakdown.push({ label: `คอม ${commission}%`, pts: 1, color: 'bg-violet-50 text-violet-700' }); }
-    // Momentum (0-2 pts)
-    if (trend30 >= 25) { score += 2; breakdown.push({ label: `🔥 +${trend30}%`, pts: 2, color: 'bg-rose-100 text-rose-800' }); }
-    else if (trend30 >= 10) { score += 1; breakdown.push({ label: `↗ +${trend30}%`, pts: 1, color: 'bg-rose-50 text-rose-700' }); }
-    // Winner clips (0-2 pts)
-    if (winnerCount >= 2) { score += 2; breakdown.push({ label: `🏆 ${winnerCount} winners`, pts: 2, color: 'bg-amber-100 text-amber-800' }); }
-    else if (winnerCount === 1) { score += 1; breakdown.push({ label: '🏆 1 winner', pts: 1, color: 'bg-amber-50 text-amber-700' }); }
-    // Platform endorsement (0-2 pts)
-    if (rank > 0 && rank <= 10) { score += 1; breakdown.push({ label: `Top #${rank}`, pts: 1, color: 'bg-sky-50 text-sky-700' }); }
-    if (isShopAds) { score += 1; breakdown.push({ label: '🛒 Shop Ads', pts: 1, color: 'bg-sky-100 text-sky-800' }); }
-    // Lock focus (+1) — already committed
-    if (isLocked) { score += 1; breakdown.push({ label: '🔒 Locked', pts: 1, color: 'bg-lime-100 text-[#012b25]' }); }
+  // 2. DISCOVERY — ที่ยังไม่ Lock, score ≥3, Top 5 (ของแข็งที่น่า Lock เพิ่ม)
+  const lockedIds = new Set(locked.map(i => i.product.id));
+  const discovery = products
+    .filter(p => !lockedIds.has(p.id) && p.decision !== 'DROP')
+    .map(p => scoreUnfairProduct(p, clips, ym))
+    .filter(s => s.score >= 3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
 
-    let tier, tierColor, recommendedClips, advice;
-    if (score >= 9) { tier = '💎 NO-BRAINER'; tierColor = 'bg-lime-400 text-[#012b25]'; recommendedClips = 6; advice = 'ลง 5-7 คลิป/สัปดาห์ — high confidence'; }
-    else if (score >= 6) { tier = '🔥 HOT'; tierColor = 'bg-rose-500 text-white'; recommendedClips = 4; advice = 'ลง 3-4 คลิป/สัปดาห์ — แตกมุมเล่า'; }
-    else if (score >= 3) { tier = '🟡 WATCH'; tierColor = 'bg-amber-400 text-amber-900'; recommendedClips = 2; advice = 'เทส 1-2 คลิป/สัปดาห์'; }
-    else { return null; } // ต่ำกว่านี้ไม่ทันแนะนำ
-
-    const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0;
-    const estOrdersPerWeek = recommendedClips * 0.6;
-    const estCommissionPerWeek = Math.round(estOrdersPerWeek * commPerOrder);
-    const remainingThisWeek = Math.max(0, recommendedClips - clipsThisMonth);
-
-    return { product: p, score, breakdown, tier, tierColor, recommendedClips, advice, estCommissionPerWeek, sales30, commission, clipsThisMonth, remainingThisWeek };
-  }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 5);
+  return { locked, discovery };
 }
 
 function getPostTodaySuggestions(products, clips) {
@@ -994,63 +1008,95 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
-      {/* ─── TIER 2: UNFAIR ADVANTAGE ENGINE (Weekly Focus Plan) ────────── */}
-      {unfairAdvantage.length > 0 && (
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
+      {/* ─── TIER 2: UNFAIR ADVANTAGE ENGINE (Commitment + Discovery) ────── */}
+      {(unfairAdvantage.locked.length > 0 || unfairAdvantage.discovery.length > 0) && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#d9eb54]" /> 💎 Unfair Advantage — Top Focus This Week
+                <Sparkles className="w-4 h-4 text-[#d9eb54]" /> 💎 This Week's Focus
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">คัดจาก GMV + Commission + Momentum + Winners + Platform signals</p>
+              <p className="text-xs text-slate-400 mt-0.5">คำมั่นที่ Lock ไว้ + โอกาสใหม่ที่น่าทุ่ม</p>
             </div>
-            <span className="text-[10px] bg-[#012b25] text-[#d9eb54] font-bold px-2.5 py-1 rounded-full">{unfairAdvantage.length} แนะนำ</span>
           </div>
-          <div className="space-y-3">
-            {unfairAdvantage.map((s, idx) => {
-              const catInfo = getAbcdInfo(s.product.category);
-              return (
-                <div key={s.product.id} className="bg-slate-50 hover:bg-slate-100 rounded-2xl transition-all border border-slate-100/60 group p-4 space-y-2.5">
-                  <div className="flex items-center gap-3">
-                    <div className="font-display text-2xl text-slate-300 w-7 text-center flex-shrink-0 group-hover:text-[#012b25] transition-colors">#{idx+1}</div>
-                    <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
-                    <div className="flex-1 min-w-0">
-                      <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${s.tierColor}`}>{s.tier}</span>
-                        <span className="text-[10px] text-slate-500 font-mono font-bold">Score {s.score}</span>
+
+          {/* ── COMMITMENTS: ทุกตัวที่ Lock ── */}
+          {unfairAdvantage.locked.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-[11px] font-bold text-[#012b25] uppercase tracking-wider"><Lock className="w-3.5 h-3.5 text-[#d9eb54]" /> Locked Commitments ({unfairAdvantage.locked.length})</div>
+              {unfairAdvantage.locked.map((s) => {
+                const catInfo = getAbcdInfo(s.product.category);
+                const statusBadge = s.lockStatus === 'done' ? { t: '✓ ครบแล้ว', c: 'bg-emerald-100 text-emerald-800' } : s.lockStatus === 'notStarted' ? { t: '🔴 ยังไม่เริ่ม', c: 'bg-rose-100 text-rose-700' } : s.lockStatus === 'behind' ? { t: '⚠️ ตามหลัง', c: 'bg-amber-100 text-amber-800' } : { t: 'on track', c: 'bg-sky-100 text-sky-700' };
+                return (
+                  <div key={s.product.id} className="bg-lime-50/40 hover:bg-lime-50 rounded-2xl transition-all border border-lime-100 group p-4 space-y-2.5">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
+                      <div className="flex-1 min-w-0">
+                        <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${statusBadge.c}`}>{statusBadge.t}</span>
+                          <span className="text-[10px] text-slate-500 font-mono font-bold">{s.done}/{s.target} คลิป</span>
+                        </div>
                       </div>
+                      <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1"><Plus className="w-3 h-3" /> คลิป</button>
                     </div>
-                    <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1">
-                      <Plus className="w-3 h-3" /> คลิป
-                    </button>
+                    {/* progress bar */}
+                    <div className="ml-12 flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-white rounded-full overflow-hidden border border-lime-100"><div className={`h-full rounded-full ${s.pct >= 100 ? 'bg-emerald-500' : 'bg-[#d9eb54]'}`} style={{ width: `${Math.min(100, s.pct)}%` }} /></div>
+                      <span className="text-[10px] font-mono font-bold text-slate-500">{s.pct}%</span>
+                      {s.behind > 0 && <span className="text-[10px] text-amber-700 font-bold">เหลือ {s.behind}</span>}
+                    </div>
                   </div>
-                  {/* Score breakdown pills */}
-                  <div className="flex flex-wrap gap-1 ml-10">
-                    {s.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${b.color}`}>{b.label} <span className="opacity-60">+{b.pts}</span></span>))}
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── DISCOVERY: Top 5 ที่ยังไม่ Lock ── */}
+          {unfairAdvantage.discovery.length > 0 && (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center gap-2 text-[11px] font-bold text-[#012b25] uppercase tracking-wider border-t border-slate-100 pt-4"><Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Opportunities — น่า Lock เพิ่ม ({unfairAdvantage.discovery.length})</div>
+              {unfairAdvantage.discovery.map((s, idx) => {
+                const catInfo = getAbcdInfo(s.product.category);
+                return (
+                  <div key={s.product.id} className="bg-slate-50 hover:bg-slate-100 rounded-2xl transition-all border border-slate-100/60 group p-4 space-y-2.5">
+                    <div className="flex items-center gap-3">
+                      <div className="font-display text-xl text-slate-300 w-6 text-center flex-shrink-0 group-hover:text-[#012b25] transition-colors">#{idx+1}</div>
+                      <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
+                      <div className="flex-1 min-w-0">
+                        <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${s.tierColor}`}>{s.tier}</span>
+                          <span className="text-[10px] text-slate-500 font-mono font-bold">Score {s.score}</span>
+                        </div>
+                      </div>
+                      <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1"><Plus className="w-3 h-3" /> คลิป</button>
+                    </div>
+                    <div className="flex flex-wrap gap-1 ml-9">
+                      {s.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${b.color}`}>{b.label} <span className="opacity-60">+{b.pts}</span></span>))}
+                    </div>
+                    <div className="ml-9 flex flex-wrap items-center gap-3 text-[10px] text-slate-600 pt-1 border-t border-slate-100">
+                      <div className="flex items-center gap-1"><Target className="w-3 h-3 text-emerald-700" /><span className="font-bold">{s.recommendedClips} คลิป/wk</span></div>
+                      {s.estCommissionPerWeek > 0 && (<div className="flex items-center gap-1"><DollarSign className="w-3 h-3 text-violet-600" /><span className="font-bold">~฿{fmtNum(s.estCommissionPerWeek)} comm/wk</span></div>)}
+                      <div className="text-slate-400 italic">{s.advice}</div>
+                    </div>
                   </div>
-                  {/* Action plan */}
-                  <div className="ml-10 flex flex-wrap items-center gap-3 text-[10px] text-slate-600 pt-1 border-t border-slate-100">
-                    <div className="flex items-center gap-1"><Target className="w-3 h-3 text-emerald-700" /><span className="font-bold">{s.recommendedClips} คลิป/wk</span> <span className="text-slate-400">(ลงไป {s.clipsThisMonth} แล้ว)</span></div>
-                    {s.estCommissionPerWeek > 0 && (<div className="flex items-center gap-1"><DollarSign className="w-3 h-3 text-violet-600" /><span className="font-bold">~฿{fmtNum(s.estCommissionPerWeek)} comm/wk</span></div>)}
-                    <div className="text-slate-400 italic">{s.advice}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* ─── TIER 2 fallback: simple Post Today (only if no Unfair Advantage) ─ */}
-      {unfairAdvantage.length === 0 && postSuggestions.length > 0 && (
+      {/* ─── TIER 2 fallback: simple Post Today (only if nothing in engine) ─ */}
+      {unfairAdvantage.locked.length === 0 && unfairAdvantage.discovery.length === 0 && postSuggestions.length > 0 && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
           <div className="flex items-center justify-between mb-5">
             <div>
               <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-emerald-700" /> ลงสินค้าอะไรวันนี้
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">ยังไม่มีสินค้าเข้าเกณฑ์ Unfair Advantage — แสดงรายการพื้นฐาน</p>
+              <p className="text-xs text-slate-400 mt-0.5">ยังไม่มีสินค้าเข้าเกณฑ์ Focus — แสดงรายการพื้นฐาน</p>
             </div>
             <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-full">{postSuggestions.length} แนะนำ</span>
           </div>
