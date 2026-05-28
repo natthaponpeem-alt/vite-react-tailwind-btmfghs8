@@ -215,8 +215,22 @@ function getTodayMission(clips, monthlyTarget) {
 }
 
 // ─── UNFAIR ADVANTAGE ENGINE — Commitment (Locked) + Discovery (Weekly) ─────
+function getRecentGMV(product) {
+  const m = product?.salesData?.monthly || {};
+  const ym = currentMonth();
+  const now = new Date();
+  const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastKey = `${lm.getFullYear()}-${String(lm.getMonth()+1).padStart(2,'0')}`;
+  const thisM = Number(m[ym]) || 0;
+  const lastM = Number(m[lastKey]) || 0;
+  const l30 = Number(product?.salesData?.last30d) || 0;
+  const best = Math.max(thisM, lastM, l30);
+  return { best, thisM, lastM, fromLastMonth: best > 0 && best === lastM && lastM > thisM };
+}
+
 function scoreUnfairProduct(p, clips, ym) {
-  const sales30 = getProductSales(p, clips, 30).primary || 0;
+  const rgInfo = getRecentGMV(p);
+  const sales30 = rgInfo.best;
   const commission = Number(p.scorecard?.commission || 0);
   const trend30 = Number(p.scorecard?.gmv30dPct || 0);
   const rank = Number(p.tiktokRank) || 0;
@@ -224,31 +238,36 @@ function scoreUnfairProduct(p, clips, ym) {
   const winnerCount = clips.filter(c => c.productId === p.id && (Number(c.gmv) || 0) >= WINNER_GMV).length;
   const isShopAds = !!p.isShopAds;
   const isLocked = p.locked?.month === ym;
+  const isReviewed = !!p.lastScoredAt;
   const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0,7) === ym).length;
 
-  let score = 0; const breakdown = [];
-  if (sales30 >= 30000) { score += 3; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 3, color: 'bg-emerald-100 text-emerald-800' }); }
-  else if (sales30 >= 10000) { score += 2; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 2, color: 'bg-emerald-50 text-emerald-700' }); }
-  else if (sales30 >= 3000) { score += 1; breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}`, pts: 1, color: 'bg-slate-100 text-slate-700' }); }
-  if (commission >= 20) { score += 2; breakdown.push({ label: `คอม ${commission}%`, pts: 2, color: 'bg-violet-100 text-violet-800' }); }
-  else if (commission >= 15) { score += 1; breakdown.push({ label: `คอม ${commission}%`, pts: 1, color: 'bg-violet-50 text-violet-700' }); }
-  if (trend30 >= 25) { score += 2; breakdown.push({ label: `🔥 +${trend30}%`, pts: 2, color: 'bg-rose-100 text-rose-800' }); }
-  else if (trend30 >= 10) { score += 1; breakdown.push({ label: `↗ +${trend30}%`, pts: 1, color: 'bg-rose-50 text-rose-700' }); }
-  if (winnerCount >= 2) { score += 2; breakdown.push({ label: `🏆 ${winnerCount} winners`, pts: 2, color: 'bg-amber-100 text-amber-800' }); }
-  else if (winnerCount === 1) { score += 1; breakdown.push({ label: '🏆 1 winner', pts: 1, color: 'bg-amber-50 text-amber-700' }); }
-  if (rank > 0 && rank <= 10) { score += 1; breakdown.push({ label: `Top #${rank}`, pts: 1, color: 'bg-sky-50 text-sky-700' }); }
-  if (isShopAds) { score += 1; breakdown.push({ label: '🛒 Shop Ads', pts: 1, color: 'bg-sky-100 text-sky-800' }); }
-  if (isLocked) { score += 1; breakdown.push({ label: '🔒 Locked', pts: 1, color: 'bg-lime-100 text-[#012b25]' }); }
+  // ★ Estimated monthly commission = เงินเข้ากระเป๋าจริง = ตัวเรียงหลัก
+  const estCommission = Math.round(sales30 * commission / 100);
 
+  const breakdown = [];
+  if (sales30 >= 30000) breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}${rgInfo.fromLastMonth ? ' (เดือนก่อน)' : ''}`, color: 'bg-emerald-100 text-emerald-800' });
+  else if (sales30 >= 10000) breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}${rgInfo.fromLastMonth ? ' (เดือนก่อน)' : ''}`, color: 'bg-emerald-50 text-emerald-700' });
+  else if (sales30 >= 3000) breakdown.push({ label: `💰 GMV ฿${fmtNum(sales30)}${rgInfo.fromLastMonth ? ' (เดือนก่อน)' : ''}`, color: 'bg-slate-100 text-slate-700' });
+  else if (sales30 > 0) breakdown.push({ label: `GMV ฿${fmtNum(sales30)}`, color: 'bg-slate-100 text-slate-600' });
+  // commission — bar lowered to 10% (calibrated to real portfolio: 53 products at 10-15%)
+  if (commission >= 20) breakdown.push({ label: `คอม ${commission}% 🔥`, color: 'bg-violet-100 text-violet-800' });
+  else if (commission >= 15) breakdown.push({ label: `คอม ${commission}%`, color: 'bg-violet-50 text-violet-700' });
+  else if (commission >= 10) breakdown.push({ label: `คอม ${commission}%`, color: 'bg-violet-50 text-violet-600' });
+  else if (commission > 0) breakdown.push({ label: `คอม ${commission}% ⚠️`, color: 'bg-amber-50 text-amber-700' });
+  if (trend30 >= 25) breakdown.push({ label: `🔥 +${trend30}%`, color: 'bg-rose-100 text-rose-800' });
+  else if (trend30 >= 10) breakdown.push({ label: `↗ +${trend30}%`, color: 'bg-rose-50 text-rose-700' });
+  if (winnerCount >= 1) breakdown.push({ label: `🏆 ${winnerCount} winner${winnerCount>1?'s':''}`, color: 'bg-amber-100 text-amber-800' });
+  if (rank > 0 && rank <= 10) breakdown.push({ label: `Top #${rank}`, color: 'bg-sky-50 text-sky-700' });
+  if (isShopAds) breakdown.push({ label: '🛒 Shop Ads', color: 'bg-sky-100 text-sky-800' });
+
+  // Tier based on estimated commission (money-grounded)
   let tier, tierColor, recommendedClips, advice;
-  if (score >= 9) { tier = '💎 NO-BRAINER'; tierColor = 'bg-lime-400 text-[#012b25]'; recommendedClips = 6; advice = 'ลง 5-7 คลิป/สัปดาห์ — high confidence'; }
-  else if (score >= 6) { tier = '🔥 HOT'; tierColor = 'bg-rose-500 text-white'; recommendedClips = 4; advice = 'ลง 3-4 คลิป/สัปดาห์ — แตกมุมเล่า'; }
-  else if (score >= 3) { tier = '🟡 WATCH'; tierColor = 'bg-amber-400 text-amber-900'; recommendedClips = 2; advice = 'เทส 1-2 คลิป/สัปดาห์'; }
+  if (estCommission >= 2000) { tier = '💎 NO-BRAINER'; tierColor = 'bg-lime-400 text-[#012b25]'; recommendedClips = 6; advice = 'ลง 5-7 คลิป/สัปดาห์ — high confidence'; }
+  else if (estCommission >= 500) { tier = '🔥 HOT'; tierColor = 'bg-rose-500 text-white'; recommendedClips = 4; advice = 'ลง 3-4 คลิป/สัปดาห์ — แตกมุมเล่า'; }
+  else if (estCommission >= 100) { tier = '🟡 WATCH'; tierColor = 'bg-amber-400 text-amber-900'; recommendedClips = 2; advice = 'เทส 1-2 คลิป/สัปดาห์'; }
   else { tier = '🔵 SPARK'; tierColor = 'bg-slate-200 text-slate-600'; recommendedClips = 1; advice = 'มีสัญญาณเริ่มต้น'; }
 
-  const commPerOrder = (price > 0 && commission > 0) ? (price * commission / 100) : 0;
-  const estCommissionPerWeek = Math.round((recommendedClips * 0.6) * commPerOrder);
-  return { product: p, score, breakdown, tier, tierColor, recommendedClips, advice, estCommissionPerWeek, sales30, commission, clipsThisMonth };
+  return { product: p, estCommission, sales30, commission, breakdown, tier, tierColor, recommendedClips, advice, clipsThisMonth, isReviewed, rgInfo };
 }
 
 function getUnfairAdvantage(products, clips) {
@@ -269,14 +288,14 @@ function getUnfairAdvantage(products, clips) {
     })
     .sort((a, b) => b.behind - a.behind);
 
-  // 2. DISCOVERY — ที่ยังไม่ Lock, score ≥3, Top 5 (ของแข็งที่น่า Lock เพิ่ม)
+  // 2. DISCOVERY — ที่ยังไม่ Lock, เรียงตาม "เงินคอมที่ได้จริง" (GMV × คอม%), Top 6
   const lockedIds = new Set(locked.map(i => i.product.id));
   const discovery = products
     .filter(p => !lockedIds.has(p.id) && p.decision !== 'DROP')
     .map(p => scoreUnfairProduct(p, clips, ym))
-    .filter(s => s.score >= 3)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+    .filter(s => s.estCommission >= 100)  // floor: คาดได้คอม ≥฿100/เดือน (กรอง noise)
+    .sort((a, b) => b.estCommission - a.estCommission)
+    .slice(0, 6);
 
   return { locked, discovery };
 }
@@ -1064,20 +1083,22 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
                       <div className="font-display text-xl text-slate-300 w-6 text-center flex-shrink-0 group-hover:text-[#012b25] transition-colors">#{idx+1}</div>
                       <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
                       <div className="flex-1 min-w-0">
-                        <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left">{s.product.name}</button>
+                          {!s.isReviewed && <span className="text-[9px] bg-sky-100 text-sky-700 font-bold px-1.5 py-0.5 rounded-md flex-shrink-0" title="ยังไม่ได้ review — อาจเป็นทองคำที่ยังไม่จับตา">🌱 ยังไม่ review</span>}
+                        </div>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${s.tierColor}`}>{s.tier}</span>
-                          <span className="text-[10px] text-slate-500 font-mono font-bold">Score {s.score}</span>
+                          <span className="text-[10px] text-violet-700 font-mono font-bold">~฿{fmtNum(s.estCommission)}/เดือน</span>
                         </div>
                       </div>
                       <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1"><Plus className="w-3 h-3" /> คลิป</button>
                     </div>
                     <div className="flex flex-wrap gap-1 ml-9">
-                      {s.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${b.color}`}>{b.label} <span className="opacity-60">+{b.pts}</span></span>))}
+                      {s.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${b.color}`}>{b.label}</span>))}
                     </div>
                     <div className="ml-9 flex flex-wrap items-center gap-3 text-[10px] text-slate-600 pt-1 border-t border-slate-100">
                       <div className="flex items-center gap-1"><Target className="w-3 h-3 text-emerald-700" /><span className="font-bold">{s.recommendedClips} คลิป/wk</span></div>
-                      {s.estCommissionPerWeek > 0 && (<div className="flex items-center gap-1"><DollarSign className="w-3 h-3 text-violet-600" /><span className="font-bold">~฿{fmtNum(s.estCommissionPerWeek)} comm/wk</span></div>)}
                       <div className="text-slate-400 italic">{s.advice}</div>
                     </div>
                   </div>
@@ -1431,12 +1452,15 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
       if (filter === 'stale' && !isStale) return false;
       if (['PICK', 'WAIT', 'DROP'].includes(filter.toUpperCase()) && p.decision?.toUpperCase() !== filter.toUpperCase()) return false;
       if (filter === 'locked' && !p.locked) return false;
+      if (filter === 'selling' && getRecentGMV(p).best <= 0) return false;
       if (['A', 'B', 'C', 'D'].includes(filter) && p.category !== filter) return false;
       if (typeFilter !== 'all' && p.productType !== typeFilter) return false;
       return true;
     });
     
     if (sortBy === 'score') list.sort((a, b) => (b.scorePct || 0) - (a.scorePct || 0));
+    else if (sortBy === 'gmv') list.sort((a, b) => getRecentGMV(b).best - getRecentGMV(a).best);
+    else if (sortBy === 'estcomm') list.sort((a, b) => (getRecentGMV(b).best * (Number(b.scorecard?.commission)||0)) - (getRecentGMV(a).best * (Number(a.scorecard?.commission)||0)));
     else if (sortBy === 'rescore') list.sort((a, b) => daysSince(b.lastScoredAt || 0) - daysSince(a.lastScoredAt || 0));
     else if (sortBy === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
     else if (sortBy === 'created') list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1447,6 +1471,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
   const staleProducts = products.filter(p => p.lastScoredAt && daysSince(p.lastScoredAt) >= RESCORE_DAYS);
   const scoredProducts = products.filter(p => !!p.lastScoredAt);
   const dropProducts = products.filter(p => p.decision === 'DROP');
+  const sellingCount = products.filter(p => getRecentGMV(p).best > 0).length;
 
   return (
     <div className="space-y-6">
@@ -1463,12 +1488,12 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
           <div className="flex flex-wrap gap-2">
             <button onClick={onOpenRadar} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> สแกนเรดาร์ TikTok</button>
             <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Product</button>
-            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="pending">🌱 Pending Review ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
+            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="pending">🌱 Pending Review ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
             <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกหมวดหมู่</option>{PRODUCT_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select>
           </div>
         </div>
         <div className="flex items-center justify-between pt-1 border-t border-slate-50 text-slate-500">
-          <div className="flex items-center gap-1 text-xs font-bold"><ArrowUpDown className="w-3.5 h-3.5 text-slate-400" /><select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="bg-transparent border-none text-xs focus:ring-0 p-0 text-slate-600 font-bold"><option value="score">คะแนน (สูง-ต่ำ)</option><option value="rescore">Stale (เก่า-ใหม่)</option><option value="name">ชื่อ A-Z</option><option value="created">เพิ่มล่าสุด</option></select><span className="text-[10px] text-slate-400 ml-1">พบ {filtered.length} รายการ</span></div>
+          <div className="flex items-center gap-1 text-xs font-bold"><ArrowUpDown className="w-3.5 h-3.5 text-slate-400" /><select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="bg-transparent border-none text-xs focus:ring-0 p-0 text-slate-600 font-bold"><option value="score">คะแนน (สูง-ต่ำ)</option><option value="gmv">💰 GMV (สูง-ต่ำ)</option><option value="estcomm">💵 คอมที่ได้ (สูง-ต่ำ)</option><option value="rescore">Stale (เก่า-ใหม่)</option><option value="name">ชื่อ A-Z</option><option value="created">เพิ่มล่าสุด</option></select><span className="text-[10px] text-slate-400 ml-1">พบ {filtered.length} รายการ</span></div>
           <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200/50"><button onClick={() => setViewMode('box')} className={`p-1 rounded-md transition-all ${viewMode === 'box' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><LayoutGrid className="w-3.5 h-3.5" /></button><button onClick={() => setViewMode('list')} className={`p-1 rounded-md transition-all ${viewMode === 'list' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><List className="w-3.5 h-3.5" /></button></div>
         </div>
 
