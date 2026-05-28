@@ -68,8 +68,14 @@ const fmtNum = (n) => (n ?? 0).toLocaleString('th-TH');
 const truncate = (s, n) => !s ? '' : s.length > n ? s.slice(0, n) + '…' : s;
 const hoursSince = (iso) => !iso ? 999 : (Date.now() - new Date(iso).getTime()) / 3600000;
 
-const getAbcdInfo = (cat) => ABCD_INFO[cat] || ABCD_INFO['V'] || { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50/50' };
-const getDecisionInfo = (dec) => DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
+const getAbcdInfo = (cat) => {
+  if (!cat || cat === 'U') return { label: 'ยังไม่จัดหมวด', short: '?', desc: 'รอจัดหมวด', bg: 'bg-slate-300', text: 'text-slate-500', border: 'border-slate-200', lightBg: 'bg-slate-50/50' };
+  return ABCD_INFO[cat] || ABCD_INFO['V'];
+};
+const getDecisionInfo = (dec) => {
+  if (!dec) return { label: 'รอจัด', bg: 'bg-slate-100', text: 'text-slate-500' };
+  return DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
+};
 const getProductTypeInfo = (typeId) => PRODUCT_TYPES.find(t => t.id === typeId) || { id: 'other', label: 'อื่นๆ', emoji: '📦' };
 
 function getStatsPending(clips) { 
@@ -472,7 +478,12 @@ export default function App() {
 
     const prodColRef = collection(db, 'artifacts', APP_ID, 'users', user.uid, 'products');
     const unsubProducts = onSnapshot(prodColRef, (snap) => {
-      const prodList = []; snap.forEach(d => prodList.push({ id: d.id, ...d.data() }));
+      const prodList = []; snap.forEach(d => {
+        const p = { id: d.id, ...d.data() };
+        // Phase A: ghost ที่ยังไม่ review (lastScoredAt ว่าง) = UNCLASSIFIED — ไม่ใช่ C/DROP
+        if (!p.lastScoredAt) { p.category = null; p.decision = null; }
+        prodList.push(p);
+      });
       setProducts(prodList);
       setDbInitialized(true);
       setIsSyncing(false);
@@ -939,6 +950,13 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const unfairAdvantage = useMemo(() => getUnfairAdvantage(products, clips), [products, clips]);
   // ─── TIER 3: Smart Warnings ─────────────────────────────────────────────
   const warnings = useMemo(() => getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }), [concentration, hasRepeatIssue, productsNeedingRescore, mission]);
+  // Phase A: ghost ที่ขายได้แต่ยังไม่จัดหมวด (awareness)
+  const unclassifiedSellers = useMemo(() => {
+    const list = products.filter(p => !p.lastScoredAt && getRecentGMV(p).best > 0)
+      .map(p => ({ p, est: Math.round(getRecentGMV(p).best * (Number(p.scorecard?.commission) || 0) / 100), gmv: getRecentGMV(p).best }))
+      .sort((a, b) => b.est - a.est);
+    return { items: list, totalEst: list.reduce((s, x) => s + x.est, 0) };
+  }, [products]);
   // ─── TIER 5: Strategic KPIs (Blended commission, Portfolio balance) ──────
   const blendedComm = useMemo(() => getBlendedCommission(products, clips), [products, clips]);
   const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips), [products, clips]);
@@ -1166,6 +1184,26 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
               {w.id === 'rescore' && <button onClick={() => onGoTo('products')} className="text-xs font-bold whitespace-nowrap text-sky-700 hover:underline self-center">ไปจัดการ →</button>}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ─── TIER 3B: Unclassified Sellers Alert (Phase A) ────────────── */}
+      {unclassifiedSellers.items.length > 0 && (
+        <div className="bg-gradient-to-br from-sky-50 to-emerald-50 border border-sky-200 rounded-3xl p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 bg-white/70 rounded-xl flex-shrink-0"><Sparkles className="w-4 h-4 text-sky-600" /></div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-sm text-[#012b25]">🌱 มี {unclassifiedSellers.items.length} สินค้าขายได้ แต่ยังไม่จัดหมวด</div>
+              <div className="text-xs text-slate-600 mt-0.5">ทำเงินรวม ~฿{fmtNum(unclassifiedSellers.totalEst)}/เดือน — จัด A/B/C/D เพื่อวางแผนลงคลิป</div>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {unclassifiedSellers.items.slice(0, 3).map(({ p, est }) => (
+                  <button key={p.id} onClick={() => onSelectProduct(p.id)} className="text-[10px] bg-white/80 hover:bg-white border border-sky-100 px-2 py-1 rounded-lg font-medium text-slate-700 transition-colors">{truncate(p.name, 18)} <span className="text-violet-700 font-bold">~฿{fmtNum(est)}</span></button>
+                ))}
+                {unclassifiedSellers.items.length > 3 && <span className="text-[10px] text-slate-400 self-center">+{unclassifiedSellers.items.length - 3} ตัว</span>}
+              </div>
+            </div>
+            <button onClick={() => onGoTo('products')} className="text-xs font-bold whitespace-nowrap text-sky-700 hover:underline self-center flex-shrink-0">จัดหมวด →</button>
+          </div>
         </div>
       )}
 
@@ -1477,7 +1515,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Products</span><div className="font-display text-2xl text-[#012b25] mt-1">{products.length}</div><div className="text-[10px] text-slate-400 mt-0.5">{scoredProducts.length} reviewed</div></div><div className="p-3 bg-slate-50 text-slate-400 rounded-2xl"><Package className="w-5 h-5" /></div></div>
-        <div className="bg-sky-50 border border-sky-200 rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-sky-100 transition-colors" onClick={() => setFilter('pending')} title="ดึงเข้ามาแต่ยังไม่ได้คัดกรอง"><div><span className="text-[10px] text-sky-700 font-bold uppercase tracking-wider block">Pending Review</span><div className="font-display text-2xl text-sky-600 mt-1">{pendingProducts.length} <span className="text-xs font-sans text-sky-500">ตัว</span></div><div className="text-[10px] text-sky-500 mt-0.5">ไม่เคยคัด — ghost จาก Radar</div></div><div className="p-3 bg-white/60 text-sky-500 rounded-2xl"><Sparkles className="w-5 h-5" /></div></div>
+        <div className="bg-sky-50 border border-sky-200 rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-sky-100 transition-colors" onClick={() => setFilter('pending')} title="ดึงเข้ามาแต่ยังไม่ได้คัดกรอง"><div><span className="text-[10px] text-sky-700 font-bold uppercase tracking-wider block">รอจัดหมวด</span><div className="font-display text-2xl text-sky-600 mt-1">{pendingProducts.length} <span className="text-xs font-sans text-sky-500">ตัว</span></div><div className="text-[10px] text-sky-500 mt-0.5">ยังไม่จัด A/B/C/D — ghost จาก Radar</div></div><div className="p-3 bg-white/60 text-sky-500 rounded-2xl"><Sparkles className="w-5 h-5" /></div></div>
         <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-amber-100 transition-colors" onClick={() => setFilter('stale')} title={`คัดล่าสุดเกิน ${RESCORE_DAYS} วัน`}><div><span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider block">Stale</span><div className="font-display text-2xl text-amber-600 mt-1">{staleProducts.length} <span className="text-xs font-sans text-amber-500">ตัว</span></div><div className="text-[10px] text-amber-500 mt-0.5">รอ rescore (เกิน {RESCORE_DAYS} วัน)</div></div><div className="p-3 bg-white/50 text-amber-500 rounded-2xl"><Clock className="w-5 h-5" /></div></div>
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-rose-50 transition-colors" onClick={() => setFilter('drop')} title="สินค้าที่ตัดสินใจว่าจะตัด"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Drop Items</span><div className="font-display text-2xl text-[#dc2626] mt-1">{dropProducts.length}</div><div className="text-[10px] text-slate-400 mt-0.5">DROP decision</div></div><div className="p-3 bg-rose-50 text-rose-500 rounded-2xl"><X className="w-5 h-5" /></div></div>
       </div>
@@ -1488,7 +1526,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
           <div className="flex flex-wrap gap-2">
             <button onClick={onOpenRadar} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> สแกนเรดาร์ TikTok</button>
             <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Product</button>
-            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="pending">🌱 Pending Review ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
+            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="pending">🌱 รอจัดหมวด ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
             <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกหมวดหมู่</option>{PRODUCT_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select>
           </div>
         </div>
@@ -2720,10 +2758,11 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
       gmvMaxPct: ghost.gmvMaxPct > 0 ? String(ghost.gmvMaxPct) : '', 
       productType: autoType, 
       scorecard: initialScorecard,
-      score: s.total, maxScore: s.max, scorePct: s.pct, decision: 'WAIT', // 👈 บังคับให้ติด WAIT ไว้ก่อน
+      score: s.total, maxScore: s.max, scorePct: s.pct,
+      decision: null, // Phase A: ghost ไม่มี decision จนกว่าจะ review
       salesData: { last30d: isCurrentMonth ? ghost.totalGmv : 0, monthly: monthlyRecord, last7d: 0, updatedAt: new Date().toISOString() },
-      category: ghost.totalGmv >= 10000 ? 'B' : 'C',
-      lastScoredAt: null // 👈 ตั้งเป็น null เพื่อให้เด้งเข้ากล่องสีส้ม PENDING ทันที!
+      category: null, // Phase A: ghost ไม่มีหมวดจนกว่าจะ review (ไม่ยัด B/C)
+      lastScoredAt: null // 👈 null = UNCLASSIFIED → เด้งเข้ากล่อง "รอจัดหมวด"
     });
     setParsedData(prev => ({ ...prev, ghosts: prev.ghosts.filter(g => g.tiktokProductId !== ghost.tiktokProductId) }));
   };
