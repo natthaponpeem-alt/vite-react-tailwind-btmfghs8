@@ -727,7 +727,7 @@ export default function App() {
         <div className="p-6 md:p-8 space-y-8">
           {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPickToPost={(productId) => { if (productId) { setSelectedProductId(productId); setClipForVOnly(false); } else { setClipForVOnly(false); } setShowAddClip(true); }} onAddVClip={() => { setClipForVOnly(true); setShowAddClip(true); }} />)}
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} onUpdate={updateProductInCloud} onTriage={() => setPage('triage')} />)}
-          {page === 'triage' && (<TriageModePage products={products} clips={clips} onUpdate={updateProductInCloud} onBack={() => setPage('products')} />)}
+          {page === 'triage' && (<TriageModePage products={products} clips={clips} onUpdate={updateProductInCloud} onBack={() => setPage('products')} showToast={showToast} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
           {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
@@ -1474,7 +1474,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 }
 
 
-function TriageModePage({ products, clips, onUpdate, onBack }) {
+function TriageModePage({ products, clips, onUpdate, onBack, showToast }) {
   const [reviewedIds, setReviewedIds] = useState(new Set());
 
   // Fixed snapshot sorted by GMV, filtered by local reviewedIds for immediate response
@@ -1487,9 +1487,11 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
 
   const [idx, setIdx] = useState(0);
   const [doneCount, setDoneCount] = useState(0);
-  const [saved, setSaved] = useState(false); // brief success flash
+  const [saved, setSaved] = useState(false);
   const [category, setCategory] = useState('');
   const [sc, setSc] = useState({ commission:'', gmv30dPct:'', gmv7dPct:'', creatorCount:'', anglesCount:'', crPct:'', concentration:'' });
+  const [tiktokLink, setTiktokLink] = useState('');
+  const [kalodataLink, setKalodataLink] = useState('');
   const [showAdv, setShowAdv] = useState(false);
 
   const safeIdx = Math.min(idx, Math.max(0, list.length - 1));
@@ -1500,6 +1502,8 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
     if (!current) return;
     setCategory(current.category || '');
     setSc({ commission: current.scorecard?.commission || '', gmv30dPct: current.scorecard?.gmv30dPct || '', gmv7dPct: current.scorecard?.gmv7dPct || '', creatorCount: current.scorecard?.creatorCount || '', anglesCount: current.scorecard?.anglesCount || '', crPct: current.scorecard?.crPct || '', concentration: current.scorecard?.concentration || '' });
+    setTiktokLink(current.tiktokLink || '');
+    setKalodataLink(current.kalodataLink || '');
     setShowAdv(false);
   }, [current?.id]);
 
@@ -1523,19 +1527,22 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
     onUpdate(current.id, {
       category: category || null,
       scorecard: sc,
+      tiktokLink: tiktokLink || null,
+      kalodataLink: kalodataLink || null,
       score: s.total, maxScore: s.max, scorePct: s.pct,
       decision: getDecision(s.pct),
       lastScoredAt: new Date().toISOString()
     });
     setSaved(true);
-    setTimeout(() => setSaved(false), 600);
+    if (showToast) showToast(`✓ บันทึก "${(current.name || '').slice(0, 30)}${(current.name || '').length > 30 ? '…' : ''}" — หมวด ${category || '?'} · ${getDecision(s.pct)}`);
+    setTimeout(() => setSaved(false), 1500);
     markReviewed(current.id);
-    // idx stays same — list.length shrinks, next product appears at same position
   };
 
   const handleDrop = () => {
     if (!current) return;
     onUpdate(current.id, { decision: 'DROP', lastScoredAt: new Date().toISOString() });
+    if (showToast) showToast(`✕ DROP "${(current.name || '').slice(0, 30)}${(current.name || '').length > 30 ? '…' : ''}"`, 'error');
     markReviewed(current.id);
   };
 
@@ -1575,12 +1582,12 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
       <div className="bg-[#012b25] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-30">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-emerald-300 hover:text-white transition-colors"><ChevronLeft className="w-4 h-4" /> กลับ</button>
         <div className="text-center">
-          <div className="font-display text-sm tracking-tight">🔍 Triage Mode</div>
-          <div className="text-[10px] text-emerald-300">{doneCount} จัดแล้ว · เหลือ {list.length - idx} ตัว</div>
+          <div className="font-display text-sm tracking-tight flex items-center justify-center gap-1.5"><Search className="w-3.5 h-3.5 text-[#d9eb54]" /> Triage Mode</div>
+          <div className="text-[10px] text-emerald-300">บันทึกในรอบนี้ {doneCount} · เหลือ {list.length - safeIdx} ตัว</div>
         </div>
         <div className="flex items-center gap-1.5">
           <button onClick={goPrev} disabled={idx === 0} className="p-1.5 rounded-lg bg-white/10 disabled:opacity-30 hover:bg-white/20 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-          <span className="text-xs font-mono font-bold w-14 text-center">{idx + 1}/{list.length}</span>
+          <span className="text-xs font-mono font-bold w-14 text-center">{safeIdx + 1}/{list.length}</span>
           <button onClick={goNext} disabled={idx >= list.length - 1} className="p-1.5 rounded-lg bg-white/10 disabled:opacity-30 hover:bg-white/20 transition-colors"><ChevronRight className="w-4 h-4" /></button>
         </div>
       </div>
@@ -1609,6 +1616,12 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
             <div><div className="text-[9px] text-emerald-300 uppercase tracking-wider mb-0.5">ราคา</div><div className="font-mono font-bold text-sm">{current.price > 0 ? `฿${fmtNum(current.price)}` : '—'}</div></div>
             <div><div className="text-[9px] text-emerald-300 uppercase tracking-wider mb-0.5">คอม (เดิม)</div><div className="font-mono font-bold text-sm">{current.scorecard?.commission ? `${current.scorecard.commission}%` : '—'}</div></div>
           </div>
+          {(tiktokLink || kalodataLink) && (
+            <div className="flex gap-2 mt-3 pt-3 border-t border-white/10">
+              {tiktokLink && <a href={tiktokLink} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-xs px-3 py-1.5 rounded-lg transition-all"><ExternalLink className="w-3 h-3" /> TikTok</a>}
+              {kalodataLink && <a href={kalodataLink} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-xs px-3 py-1.5 rounded-lg transition-all"><ExternalLink className="w-3 h-3" /> Kalodata</a>}
+            </div>
+          )}
         </div>
 
         {/* Category + Scorecard */}
@@ -1617,12 +1630,27 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
           <div>
             <div className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-2">จัดหมวด A/B/C/D</div>
             <div className="grid grid-cols-4 gap-2">
-              {['A','B','C','D'].map(c => { const ci = getAbcdInfo(c); return (
+              {['A','B','C','D'].map(c => { const ci = getAbcdInfo(c); const shortDesc = (ci.label || '').split('— ')[1] || ci.desc || ''; return (
                 <button key={c} onClick={() => setCategory(c)} className={`py-3 rounded-2xl font-bold text-sm transition-all border-2 ${category === c ? `${ci.bg} text-white border-transparent shadow-md scale-105` : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-slate-200 hover:bg-slate-100'}`}>
                   <div className="text-base">{c}</div>
-                  <div className="text-[9px] font-normal mt-0.5 leading-tight opacity-70">{ci.desc?.slice(0,10)}</div>
+                  <div className="text-[10px] font-normal mt-0.5 leading-tight opacity-80">{shortDesc}</div>
                 </button>
               ); })}
+            </div>
+          </div>
+
+          {/* Links (TikTok + Kalodata) */}
+          <div>
+            <div className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-2">Links (กรอกเพื่อให้กลับมาเปิดดูได้)</div>
+            <div className="grid grid-cols-1 gap-2">
+              <div className="relative">
+                <input value={tiktokLink} onChange={e => setTiktokLink(e.target.value)} placeholder="🛒 TikTok Store link" className="w-full pl-3 pr-10 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/20 transition-all" />
+                {tiktokLink && <a href={tiktokLink} target="_blank" rel="noreferrer" className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-[#012b25] hover:bg-emerald-50 rounded-lg transition-colors" title="เปิดในแท็บใหม่"><ExternalLink className="w-3.5 h-3.5" /></a>}
+              </div>
+              <div className="relative">
+                <input value={kalodataLink} onChange={e => setKalodataLink(e.target.value)} placeholder="📊 Kalodata link" className="w-full pl-3 pr-10 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/20 transition-all" />
+                {kalodataLink && <a href={kalodataLink} target="_blank" rel="noreferrer" className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-[#012b25] hover:bg-emerald-50 rounded-lg transition-colors" title="เปิดในแท็บใหม่"><ExternalLink className="w-3.5 h-3.5" /></a>}
+              </div>
             </div>
           </div>
 
