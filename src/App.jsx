@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Home, Package, Lock, BarChart3, Settings, Plus, X, Copy, Download, 
-  Upload, Trash2, Edit3, ChevronRight, ChevronLeft, AlertCircle, 
-  CheckCircle2, Clock, Zap, Target, Wand2, FileText, Sparkles, 
+  Upload, Trash2, Edit3, ChevronRight, ChevronLeft, ChevronDown, AlertCircle, 
+  CheckCircle2, Check, Clock, Zap, Target, Wand2, FileText, Sparkles, 
   Trophy, Search, RefreshCw, DollarSign, Activity, LayoutGrid, 
   List, ArrowUpDown, ExternalLink, Database, Flame, TrendingUp, 
   TrendingDown, AlertTriangle, Lightbulb, Repeat, Cloud, CloudOff, 
@@ -726,7 +726,8 @@ export default function App() {
 
         <div className="p-6 md:p-8 space-y-8">
           {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPickToPost={(productId) => { if (productId) { setSelectedProductId(productId); setClipForVOnly(false); } else { setClipForVOnly(false); } setShowAddClip(true); }} onAddVClip={() => { setClipForVOnly(true); setShowAddClip(true); }} />)}
-          {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} onUpdate={updateProductInCloud} />)}
+          {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} onUpdate={updateProductInCloud} onTriage={() => setPage('triage')} />)}
+          {page === 'triage' && (<TriageModePage products={products} clips={clips} onUpdate={updateProductInCloud} onBack={() => setPage('products')} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
           {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
@@ -1203,7 +1204,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
                 {unclassifiedSellers.items.length > 3 && <span className="text-[10px] text-slate-400 self-center">+{unclassifiedSellers.items.length - 3} ตัว</span>}
               </div>
             </div>
-            <button onClick={() => onGoTo('products')} className="text-xs font-bold whitespace-nowrap text-sky-700 hover:underline self-center flex-shrink-0">จัดหมวด →</button>
+            <button onClick={() => onGoTo('triage')} className="text-xs font-bold whitespace-nowrap text-sky-700 hover:underline self-center flex-shrink-0">🔍 Triage →</button>
           </div>
         </div>
       )}
@@ -1473,7 +1474,203 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 }
 
 
-function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdate }) {
+function TriageModePage({ products, clips, onUpdate, onBack }) {
+  const list = useMemo(() =>
+    [...products.filter(p => !p.lastScoredAt)]
+      .sort((a, b) => getRecentGMV(b, clips).best - getRecentGMV(a, clips).best),
+    [products, clips]);
+
+  const [idx, setIdx] = useState(0);
+  const [doneCount, setDoneCount] = useState(0);
+  const [category, setCategory] = useState('');
+  const [sc, setSc] = useState({ commission:'', gmv30dPct:'', gmv7dPct:'', creatorCount:'', anglesCount:'', crPct:'', concentration:'' });
+  const [showAdv, setShowAdv] = useState(false);
+
+  const current = list[Math.min(idx, list.length - 1)];
+
+  useEffect(() => {
+    if (!current) return;
+    setCategory(current.category || '');
+    setSc({ commission: current.scorecard?.commission || '', gmv30dPct: current.scorecard?.gmv30dPct || '', gmv7dPct: current.scorecard?.gmv7dPct || '', creatorCount: current.scorecard?.creatorCount || '', anglesCount: current.scorecard?.anglesCount || '', crPct: current.scorecard?.crPct || '', concentration: current.scorecard?.concentration || '' });
+  }, [current?.id]);
+
+  const liveScore = useMemo(() => calcScore(sc), [sc]);
+  const liveDecision = getDecision(liveScore.pct);
+  const decInfo = getDecisionInfo(liveDecision);
+
+  const goNext = () => setIdx(i => i + 1);
+  const goPrev = () => setIdx(i => Math.max(0, i - 1));
+
+  const handleSave = () => {
+    if (!current) return;
+    const s = calcScore(sc);
+    onUpdate(current.id, { category: category || null, scorecard: sanitizeForFirestore(sc), score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct), lastScoredAt: new Date().toISOString() });
+    setDoneCount(d => d + 1); goNext();
+  };
+  const handleDrop = () => {
+    if (!current) return;
+    onUpdate(current.id, { decision: 'DROP', lastScoredAt: new Date().toISOString() });
+    setDoneCount(d => d + 1); goNext();
+  };
+  const handleSkip = () => goNext();
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+      if (e.key === 'ArrowRight') goNext();
+      else if (e.key === 'ArrowLeft') goPrev();
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); }
+      else if (e.key === 'd' || e.key === 'D') handleDrop();
+      else if (e.key === 'Escape') handleSkip();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [current?.id, sc, category, idx, list.length]);
+
+  if (list.length === 0 || idx >= list.length) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#f7f7f7] px-6 text-center">
+        <div className="text-5xl mb-4">🎉</div>
+        <h2 className="font-display text-2xl text-[#012b25] mb-2">Triage เสร็จแล้ว!</h2>
+        <p className="text-sm text-slate-500 mb-1">จัดหมวดไปแล้ว {doneCount} สินค้า</p>
+        <p className="text-xs text-slate-400 mb-6">สินค้าที่ข้ามไว้ ยังอยู่ใน "รอจัดหมวด" — กลับมา Triage ได้ตลอด</p>
+        <button onClick={onBack} className="bg-[#012b25] text-[#d9eb54] font-bold px-6 py-3 rounded-2xl shadow-md">← กลับหน้าสินค้า</button>
+      </div>
+    );
+  }
+
+  const rg = getRecentGMV(current, clips);
+  const progress = (idx / Math.max(1, list.length)) * 100;
+
+  return (
+    <div className="flex flex-col min-h-screen bg-[#f7f7f7]">
+      {/* Header bar */}
+      <div className="bg-[#012b25] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-30">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-emerald-300 hover:text-white transition-colors"><ChevronLeft className="w-4 h-4" /> กลับ</button>
+        <div className="text-center">
+          <div className="font-display text-sm tracking-tight">🔍 Triage Mode</div>
+          <div className="text-[10px] text-emerald-300">{doneCount} จัดแล้ว · เหลือ {list.length - idx} ตัว</div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button onClick={goPrev} disabled={idx === 0} className="p-1.5 rounded-lg bg-white/10 disabled:opacity-30 hover:bg-white/20 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+          <span className="text-xs font-mono font-bold w-14 text-center">{idx + 1}/{list.length}</span>
+          <button onClick={goNext} disabled={idx >= list.length - 1} className="p-1.5 rounded-lg bg-white/10 disabled:opacity-30 hover:bg-white/20 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-1 bg-[#012b25]/10">
+        <div className="h-full bg-[#d9eb54] transition-all duration-300" style={{ width: `${progress}%` }} />
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 max-w-2xl mx-auto w-full px-4 py-5 space-y-4">
+        {/* Product context card */}
+        <div className="bg-gradient-to-br from-[#012b25] via-[#023831] to-[#034c40] rounded-3xl p-5 text-white shadow-md">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex-1 min-w-0">
+              <h2 className="font-display text-xl leading-snug truncate">{current.name}</h2>
+              <p className="text-emerald-300 text-sm mt-0.5">{current.brand || '—'}</p>
+            </div>
+            <div className="flex flex-col gap-1 items-end flex-shrink-0">
+              {current.isShopAds && <span className="bg-rose-500/20 text-rose-300 text-[9px] font-bold px-2 py-0.5 rounded-md border border-rose-500/20">🛒 Ads</span>}
+              {current.category && <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md ${getAbcdInfo(current.category).bg} text-white`}>ปัจจุบัน: {current.category}</span>}
+            </div>
+          </div>
+          <div className="flex gap-4 pt-3 border-t border-white/10">
+            <div><div className="text-[9px] text-emerald-300 uppercase tracking-wider mb-0.5">GMV ล่าสุด</div><div className="font-mono font-bold text-sm">฿{fmtNum(rg.best)}{rg.fromLastMonth && <span className="text-amber-300 text-[9px] ml-1">(ก่อน)</span>}</div></div>
+            <div><div className="text-[9px] text-emerald-300 uppercase tracking-wider mb-0.5">ราคา</div><div className="font-mono font-bold text-sm">{current.price > 0 ? `฿${fmtNum(current.price)}` : '—'}</div></div>
+            <div><div className="text-[9px] text-emerald-300 uppercase tracking-wider mb-0.5">คอม (เดิม)</div><div className="font-mono font-bold text-sm">{current.scorecard?.commission ? `${current.scorecard.commission}%` : '—'}</div></div>
+          </div>
+        </div>
+
+        {/* Category + Scorecard */}
+        <div className="bg-white rounded-3xl p-5 border border-[#e9eceb] shadow-sm space-y-4">
+          {/* Category picker */}
+          <div>
+            <div className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-2">จัดหมวด A/B/C/D</div>
+            <div className="grid grid-cols-4 gap-2">
+              {['A','B','C','D'].map(c => { const ci = getAbcdInfo(c); return (
+                <button key={c} onClick={() => setCategory(c)} className={`py-3 rounded-2xl font-bold text-sm transition-all border-2 ${category === c ? `${ci.bg} text-white border-transparent shadow-md scale-105` : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-slate-200 hover:bg-slate-100'}`}>
+                  <div className="text-base">{c}</div>
+                  <div className="text-[9px] font-normal mt-0.5 leading-tight opacity-70">{ci.desc?.slice(0,10)}</div>
+                </button>
+              ); })}
+            </div>
+          </div>
+
+          {/* Key scorecard fields */}
+          <div>
+            <div className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-2.5">Scorecard (Argoon)</div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {[
+                { key: 'commission',  label: '💵 Commission %',   ph: 'เช่น 15' },
+                { key: 'gmv30dPct',   label: '📈 GMV 30d Trend %', ph: 'เช่น 25.5' },
+                { key: 'creatorCount', label: '👥 Creator Count',  ph: 'จำนวนผู้ขาย' },
+                { key: 'gmv7dPct',    label: '⚡ GMV 7d Trend %',  ph: 'เช่น 12' },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="text-[10px] text-slate-400 font-semibold block mb-1">{f.label}</label>
+                  <input type="number" value={sc[f.key]} onChange={e => setSc(s => ({ ...s, [f.key]: e.target.value }))} placeholder={f.ph} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/20 font-mono transition-all" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Advanced toggle */}
+          <button onClick={() => setShowAdv(s => !s)} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-700 transition-colors">
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdv ? 'rotate-180' : ''}`} />
+            {showAdv ? 'ซ่อน Advanced' : 'Advanced — Angles / CR% / Concentration'}
+          </button>
+
+          {showAdv && (
+            <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-slate-100">
+              {[
+                { key: 'anglesCount',    label: '🎬 Angles tested' },
+                { key: 'crPct',          label: '🎯 CR % (conversion)' },
+                { key: 'concentration',  label: '🔒 Concentration %' },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="text-[10px] text-slate-400 font-semibold block mb-1">{f.label}</label>
+                  <input type="number" value={sc[f.key]} onChange={e => setSc(s => ({ ...s, [f.key]: e.target.value }))} className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600 font-mono" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Live score */}
+          <div className="flex items-center justify-between bg-slate-50 rounded-2xl p-3.5 border border-slate-100">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-1">Argoon Score (live)</div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-display text-2xl text-[#012b25]">{liveScore.total}</span>
+                <span className="text-sm text-slate-400">/ {liveScore.max}</span>
+                <span className="text-xs text-slate-500 font-mono">({liveScore.pct}%)</span>
+              </div>
+            </div>
+            <span className={`font-bold text-sm px-4 py-2 rounded-xl ${decInfo.bg} ${decInfo.text}`}>{liveDecision || '—'}</span>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="grid grid-cols-3 gap-3">
+          <button onClick={handleSkip} className="py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-500 font-bold text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5">
+            <ChevronRight className="w-4 h-4" /> ข้าม
+          </button>
+          <button onClick={handleDrop} className="py-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 font-bold text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5">
+            <X className="w-4 h-4" /> DROP
+          </button>
+          <button onClick={handleSave} className="py-3.5 rounded-2xl bg-[#012b25] text-[#d9eb54] font-bold text-sm hover:bg-[#033c32] transition-all shadow-md flex items-center justify-center gap-1.5">
+            <Check className="w-4 h-4" /> บันทึก
+          </button>
+        </div>
+        <p className="text-center text-[10px] text-slate-400 pb-4">⌨️ ←→ นำทาง · Enter = บันทึก · D = DROP · Esc = ข้าม</p>
+      </div>
+    </div>
+  );
+}
+
+function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdate, onTriage }) {
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('scored');
   const [typeFilter, setTypeFilter] = useState('all'); const [sortBy, setSortBy] = useState('score');
   const [classifyingId, setClassifyingId] = useState(null);
@@ -1545,6 +1742,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdat
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="relative flex-1"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search for items..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
           <div className="flex flex-wrap gap-2">
+            {pendingProducts.length > 0 && <button onClick={onTriage} className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Search className="w-3.5 h-3.5" /> 🔍 Triage ({pendingProducts.length})</button>}
             <button onClick={onOpenRadar} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> สแกนเรดาร์ TikTok</button>
             <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Product</button>
             <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="pending">🌱 รอจัดหมวด ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
