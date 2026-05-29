@@ -1475,44 +1475,71 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 
 
 function TriageModePage({ products, clips, onUpdate, onBack }) {
+  const [reviewedIds, setReviewedIds] = useState(new Set());
+
+  // Fixed snapshot sorted by GMV, filtered by local reviewedIds for immediate response
   const list = useMemo(() =>
-    [...products.filter(p => !p.lastScoredAt)]
+    products
+      .filter(p => !p.lastScoredAt && !reviewedIds.has(p.id))
       .sort((a, b) => getRecentGMV(b, clips).best - getRecentGMV(a, clips).best),
-    [products, clips]);
+    [products, clips, reviewedIds]
+  );
 
   const [idx, setIdx] = useState(0);
   const [doneCount, setDoneCount] = useState(0);
+  const [saved, setSaved] = useState(false); // brief success flash
   const [category, setCategory] = useState('');
   const [sc, setSc] = useState({ commission:'', gmv30dPct:'', gmv7dPct:'', creatorCount:'', anglesCount:'', crPct:'', concentration:'' });
   const [showAdv, setShowAdv] = useState(false);
 
-  const current = list[Math.min(idx, list.length - 1)];
+  const safeIdx = Math.min(idx, Math.max(0, list.length - 1));
+  const current = list[safeIdx];
 
   useEffect(() => {
+    setSaved(false);
     if (!current) return;
     setCategory(current.category || '');
     setSc({ commission: current.scorecard?.commission || '', gmv30dPct: current.scorecard?.gmv30dPct || '', gmv7dPct: current.scorecard?.gmv7dPct || '', creatorCount: current.scorecard?.creatorCount || '', anglesCount: current.scorecard?.anglesCount || '', crPct: current.scorecard?.crPct || '', concentration: current.scorecard?.concentration || '' });
+    setShowAdv(false);
   }, [current?.id]);
 
   const liveScore = useMemo(() => calcScore(sc), [sc]);
   const liveDecision = getDecision(liveScore.pct);
   const decInfo = getDecisionInfo(liveDecision);
 
-  const goNext = () => setIdx(i => i + 1);
+  const goNext = () => setIdx(i => Math.min(i + 1, list.length));
   const goPrev = () => setIdx(i => Math.max(0, i - 1));
+
+  // Mark as reviewed locally (instant) + write to Firestore (async in background)
+  // idx stays same → next product slides into position naturally
+  const markReviewed = (id) => {
+    setReviewedIds(prev => { const n = new Set(prev); n.add(id); return n; });
+    setDoneCount(d => d + 1);
+  };
 
   const handleSave = () => {
     if (!current) return;
     const s = calcScore(sc);
-    onUpdate(current.id, { category: category || null, scorecard: sanitizeForFirestore(sc), score: s.total, maxScore: s.max, scorePct: s.pct, decision: getDecision(s.pct), lastScoredAt: new Date().toISOString() });
-    setDoneCount(d => d + 1); goNext();
+    onUpdate(current.id, {
+      category: category || null,
+      scorecard: sanitizeForFirestore(sc),
+      score: s.total, maxScore: s.max, scorePct: s.pct,
+      decision: getDecision(s.pct),
+      lastScoredAt: new Date().toISOString()
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 600);
+    markReviewed(current.id);
+    // idx stays same — list.length shrinks, next product appears at same position
   };
+
   const handleDrop = () => {
     if (!current) return;
     onUpdate(current.id, { decision: 'DROP', lastScoredAt: new Date().toISOString() });
-    setDoneCount(d => d + 1); goNext();
+    markReviewed(current.id);
   };
-  const handleSkip = () => goNext();
+
+  const handleSkip = () => goNext(); // only skip actually advances idx
 
   useEffect(() => {
     const handler = (e) => {
@@ -1660,8 +1687,8 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
           <button onClick={handleDrop} className="py-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 font-bold text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5">
             <X className="w-4 h-4" /> DROP
           </button>
-          <button onClick={handleSave} className="py-3.5 rounded-2xl bg-[#012b25] text-[#d9eb54] font-bold text-sm hover:bg-[#033c32] transition-all shadow-md flex items-center justify-center gap-1.5">
-            <Check className="w-4 h-4" /> บันทึก
+          <button onClick={handleSave} className={`py-3.5 rounded-2xl font-bold text-sm transition-all shadow-md flex items-center justify-center gap-1.5 ${saved ? 'bg-emerald-500 text-white scale-95' : 'bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32]'}`}>
+            <Check className="w-4 h-4" /> {saved ? '✓ บันทึกแล้ว!' : 'บันทึก'}
           </button>
         </div>
         <p className="text-center text-[10px] text-slate-400 pb-4">⌨️ ←→ นำทาง · Enter = บันทึก · D = DROP · Esc = ข้าม</p>
