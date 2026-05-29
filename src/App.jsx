@@ -221,21 +221,22 @@ function getTodayMission(clips, monthlyTarget) {
 }
 
 // ─── UNFAIR ADVANTAGE ENGINE — Commitment (Locked) + Discovery (Weekly) ─────
-function getRecentGMV(product) {
+function getRecentGMV(product, clips) {
   const m = product?.salesData?.monthly || {};
   const ym = currentMonth();
   const now = new Date();
   const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastKey = `${lm.getFullYear()}-${String(lm.getMonth()+1).padStart(2,'0')}`;
-  const thisM = Number(m[ym]) || 0;
-  const lastM = Number(m[lastKey]) || 0;
+  const clipSumOf = (mk) => Array.isArray(clips) ? clips.filter(c => c.productId === product?.id && c.postedAt?.slice(0,7) === mk).reduce((s, c) => s + (Number(c.gmv) || 0), 0) : 0;
+  const thisM = Math.max(Number(m[ym]) || 0, clipSumOf(ym));
+  const lastM = Math.max(Number(m[lastKey]) || 0, clipSumOf(lastKey));
   const l30 = Number(product?.salesData?.last30d) || 0;
   const best = Math.max(thisM, lastM, l30);
   return { best, thisM, lastM, fromLastMonth: best > 0 && best === lastM && lastM > thisM };
 }
 
 function scoreUnfairProduct(p, clips, ym) {
-  const rgInfo = getRecentGMV(p);
+  const rgInfo = getRecentGMV(p, clips);
   const sales30 = rgInfo.best;
   const commission = Number(p.scorecard?.commission || 0);
   const trend30 = Number(p.scorecard?.gmv30dPct || 0);
@@ -952,11 +953,11 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const warnings = useMemo(() => getDashboardWarnings({ concentration, hasRepeatIssue, productsNeedingRescore, mission }), [concentration, hasRepeatIssue, productsNeedingRescore, mission]);
   // Phase A: ghost ที่ขายได้แต่ยังไม่จัดหมวด (awareness)
   const unclassifiedSellers = useMemo(() => {
-    const list = products.filter(p => !p.lastScoredAt && getRecentGMV(p).best > 0)
-      .map(p => ({ p, est: Math.round(getRecentGMV(p).best * (Number(p.scorecard?.commission) || 0) / 100), gmv: getRecentGMV(p).best }))
+    const list = products.filter(p => !p.lastScoredAt && getRecentGMV(p, clips).best > 0)
+      .map(p => ({ p, est: Math.round(getRecentGMV(p, clips).best * (Number(p.scorecard?.commission) || 0) / 100), gmv: getRecentGMV(p, clips).best }))
       .sort((a, b) => b.est - a.est);
     return { items: list, totalEst: list.reduce((s, x) => s + x.est, 0) };
-  }, [products]);
+  }, [products, clips]);
   // ─── TIER 5: Strategic KPIs (Blended commission, Portfolio balance) ──────
   const blendedComm = useMemo(() => getBlendedCommission(products, clips), [products, clips]);
   const portfolioBalance = useMemo(() => getPortfolioBalance(products, clips), [products, clips]);
@@ -1484,7 +1485,11 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
     for (let i = 0; i < 6; i++) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); opts.push({ value: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' }) }); }
     return opts;
   }, []);
-  const monthGMV = (p) => Number(p?.salesData?.monthly?.[gmvMonth]) || 0;
+  const monthGMV = (p) => {
+    const ledger = Number(p?.salesData?.monthly?.[gmvMonth]) || 0;
+    const clipSum = (clips || []).filter(c => c.productId === p?.id && c.postedAt?.slice(0,7) === gmvMonth).reduce((s, c) => s + (Number(c.gmv) || 0), 0);
+    return Math.max(ledger, clipSum);
+  };
 
   const filtered = useMemo(() => {
     let list = products.filter(p => {
@@ -1510,7 +1515,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
     else if (sortBy === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
     else if (sortBy === 'created') list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return list;
-  }, [products, search, filter, typeFilter, sortBy, gmvMonth]);
+  }, [products, clips, search, filter, typeFilter, sortBy, gmvMonth]);
 
   const pendingProducts = products.filter(p => !p.lastScoredAt);
   const staleProducts = products.filter(p => p.lastScoredAt && daysSince(p.lastScoredAt) >= RESCORE_DAYS);
