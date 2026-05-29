@@ -307,6 +307,30 @@ function getUnfairAdvantage(products, clips) {
   return { locked, discovery };
 }
 
+function getThisWeekFocus(products, clips) {
+  if (!Array.isArray(products)) return [];
+  const ym = currentMonth();
+  return ['A', 'B', 'C', 'D'].map(cat => {
+    const items = products
+      .filter(p => p.category === cat && p.decision !== 'DROP')
+      .map(p => {
+        const rg = getRecentGMV(p, clips);
+        const isLocked = p.locked?.month === ym;
+        const clipsThisMonth = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0, 7) === ym).length;
+        const target = isLocked ? (p.locked.targetClips || 10) : 0;
+        const commission = Number(p.scorecard?.commission) || 0;
+        const estComm = Math.round(rg.best * commission / 100);
+        return { p, gmv: rg.best, fromLast: rg.fromLastMonth, isLocked, clipsThisMonth, target, estComm, commission };
+      })
+      .sort((a, b) => {
+        if (a.isLocked !== b.isLocked) return b.isLocked - a.isLocked;
+        return b.gmv - a.gmv;
+      })
+      .slice(0, 5);
+    return { cat, items, total: items.length };
+  });
+}
+
 function getPostTodaySuggestions(products, clips) {
   if (!Array.isArray(products)) return [];
   const todayStrVal = todayStr(); const ym = currentMonth();
@@ -948,6 +972,8 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const mission = useMemo(() => getTodayMission(clips, appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET), [clips, appSettings]);
   // ─── TIER 2: What to Post Today ─────────────────────────────────────────
   const postSuggestions = useMemo(() => getPostTodaySuggestions(products, clips), [products, clips]);
+  // ─── TIER 2A: This Week's Focus (ABCD boxes — Phase C.1) ───────────────
+  const thisWeekFocus = useMemo(() => getThisWeekFocus(products, clips), [products, clips]);
   // ─── TIER 2B: Unfair Advantage Engine (Top Focus Weekly Plan) ──────────
   const unfairAdvantage = useMemo(() => getUnfairAdvantage(products, clips), [products, clips]);
   // ─── TIER 3: Smart Warnings ─────────────────────────────────────────────
@@ -1047,6 +1073,60 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
+      {/* ─── TIER 2A: THIS WEEK'S FOCUS — ABCD BOXES (Phase C.1) ────────── */}
+      {thisWeekFocus.some(b => b.total > 0) && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2"><Target className="w-4 h-4 text-emerald-700" /> โฟกัสประจำสัปดาห์</h3>
+              <p className="text-xs text-slate-400 mt-0.5">สินค้าจัดหมวดแล้ว — คลิกเพื่อลงคลิปทันที</p>
+            </div>
+            <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-full">{thisWeekFocus.reduce((s, b) => s + b.total, 0)} สินค้า</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {thisWeekFocus.map(box => {
+              const ci = getAbcdInfo(box.cat);
+              const shortDesc = (ci.label || '').split('— ')[1] || ci.desc || '';
+              return (
+                <div key={box.cat} className={`rounded-2xl border border-slate-100 overflow-hidden ${ci.lightBg} flex flex-col`}>
+                  {/* Box header */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-7 h-7 rounded-lg ${ci.bg} text-white flex items-center justify-center font-bold text-xs shadow-sm`}>{box.cat}</div>
+                      <div>
+                        <div className="font-display text-sm text-[#012b25] leading-tight">{shortDesc}</div>
+                        <div className="text-[9px] text-slate-400 uppercase tracking-wider">{box.total} สินค้า</div>
+                      </div>
+                    </div>
+                    {box.total > 0 && <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${ci.bg} text-white opacity-80`}>หมวด {box.cat}</span>}
+                  </div>
+                  {/* Box body */}
+                  <div className="p-2.5 space-y-1.5 flex-1">
+                    {box.items.length === 0 ? (
+                      <button onClick={() => onGoTo && onGoTo('triage')} className="w-full text-center py-6 text-xs text-slate-400 hover:text-emerald-700 hover:bg-white/60 rounded-xl transition-all border border-dashed border-slate-200">ยังไม่มีสินค้าหมวดนี้ <span className="font-bold underline">→ จัด Triage</span></button>
+                    ) : box.items.map(item => (
+                      <div key={item.p.id} className="group flex items-center gap-2 bg-white hover:bg-slate-50 rounded-xl p-2.5 border border-transparent hover:border-slate-200 transition-all">
+                        {item.isLocked && <Lock className="w-3 h-3 text-[#d9eb54] flex-shrink-0" title="Locked focus" />}
+                        <button onClick={() => onSelectProduct && onSelectProduct(item.p.id)} className="flex-1 min-w-0 text-left">
+                          <div className="text-xs font-semibold text-slate-800 group-hover:text-emerald-800 truncate leading-tight">{item.p.name}</div>
+                          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                            <span className="font-mono font-bold text-[#012b25]">฿{fmtNum(item.gmv)}</span>
+                            {item.fromLast && <span className="text-amber-600">เดือนก่อน</span>}
+                            {item.isLocked && <span className="text-emerald-700 font-bold">{item.clipsThisMonth}/{item.target}</span>}
+                            {item.estComm > 0 && <span className="text-violet-600">~฿{fmtNum(item.estComm)}/ด</span>}
+                          </div>
+                        </button>
+                        <button onClick={() => onPickToPost && onPickToPost(item.p.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm transition-all flex-shrink-0 flex items-center gap-1 opacity-80 group-hover:opacity-100"><Plus className="w-3 h-3" /> คลิป</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ─── TIER 2: UNFAIR ADVANTAGE ENGINE (Commitment + Discovery) ────── */}
       {(unfairAdvantage.locked.length > 0 || unfairAdvantage.discovery.length > 0) && (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5">
@@ -1129,44 +1209,6 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
-      {/* ─── TIER 2 fallback: simple Post Today (only if nothing in engine) ─ */}
-      {unfairAdvantage.locked.length === 0 && unfairAdvantage.discovery.length === 0 && postSuggestions.length > 0 && (
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-700" /> ลงสินค้าอะไรวันนี้
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">ยังไม่มีสินค้าเข้าเกณฑ์ Focus — แสดงรายการพื้นฐาน</p>
-            </div>
-            <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-full">{postSuggestions.length} แนะนำ</span>
-          </div>
-          <div className="space-y-2">
-            {postSuggestions.map((s, idx) => {
-              const catInfo = getAbcdInfo(s.product.category);
-              return (
-                <div key={s.product.id} className="flex items-center gap-3 p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl transition-all border border-slate-100/60 group">
-                  <div className="font-display text-2xl text-slate-300 w-7 text-center flex-shrink-0 group-hover:text-[#012b25] transition-colors">#{idx+1}</div>
-                  <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
-                  <div className="flex-1 min-w-0">
-                    <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {s.reasons.map((r, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${r.color}`}>{r.text}</span>))}
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0 hidden sm:block">
-                    <div className="text-[9px] text-slate-400 uppercase tracking-wider font-bold">{s.statLabel}</div>
-                    <div className="font-mono text-xs font-bold text-[#012b25]">{s.statValue}</div>
-                  </div>
-                  <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1">
-                    <Plus className="w-3 h-3" /> คลิป
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* ─── TIER 3: SMART WARNINGS (only if any) ─────────────────────── */}
       {warnings.length > 0 && (
