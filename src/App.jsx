@@ -726,7 +726,7 @@ export default function App() {
 
         <div className="p-6 md:p-8 space-y-8">
           {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPickToPost={(productId) => { if (productId) { setSelectedProductId(productId); setClipForVOnly(false); } else { setClipForVOnly(false); } setShowAddClip(true); }} onAddVClip={() => { setClipForVOnly(true); setShowAddClip(true); }} />)}
-          {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} />)}
+          {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} onUpdate={updateProductInCloud} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
           {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
           {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
@@ -1473,9 +1473,18 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 }
 
 
-function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
+function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdate }) {
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('scored');
   const [typeFilter, setTypeFilter] = useState('all'); const [sortBy, setSortBy] = useState('score');
+  const [classifyingId, setClassifyingId] = useState(null);
+
+  // Quick classify: assign category + mark as human-classified (sets lastScoredAt so Phase A transform won't reset)
+  const quickClassify = (productId, category) => {
+    if (!onUpdate) return;
+    const now = new Date().toISOString();
+    onUpdate(productId, { category, lastScoredAt: now });
+    setClassifyingId(null);
+  };
   
   const [viewMode, setViewMode] = useState(() => { try { return localStorage.getItem('peem6pack_viewMode') || 'box'; } catch { return 'box'; } });
   useEffect(() => { try { localStorage.setItem('peem6pack_viewMode', viewMode); } catch {} }, [viewMode]);
@@ -1566,7 +1575,14 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                   {p.locked && <div className="absolute top-4 right-4 text-[#012b25] bg-lime-400/20 p-1.5 rounded-full border border-lime-400/20"><Lock className="w-3.5 h-3.5" /></div>}
                   <div>
                     <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-                      <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                      {classifyingId === p.id || !p.category ? (
+                        <div onClick={e => e.stopPropagation()} className="flex items-center gap-0.5 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
+                          {['A','B','C','D'].map(c => { const ci = getAbcdInfo(c); return (<button key={c} onClick={() => quickClassify(p.id, c)} title={`จัดเป็น ${c}`} className={`w-6 h-6 rounded-md font-bold text-[10px] transition-all ${p.category === c ? `${ci.bg} text-white shadow-sm` : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'}`}>{c}</button>); })}
+                          {p.category && <button onClick={() => setClassifyingId(null)} title="ยกเลิก" className="w-5 h-6 text-slate-400 hover:text-slate-700 text-xs"><X className="w-3 h-3 mx-auto"/></button>}
+                        </div>
+                      ) : (
+                        <button onClick={e => { e.stopPropagation(); setClassifyingId(p.id); }} title="คลิกเปลี่ยนหมวด" className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0 hover:ring-2 hover:ring-emerald-300 transition-all`}>{catInfo.short}</button>
+                      )}
                       {p.isShopAds && <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded-md border border-rose-100">🛒 Ads</span>}
                       {p.price > 0 && <span className="text-[9px] bg-slate-100 text-slate-600 font-semibold font-mono px-1.5 py-0.5 rounded-md">฿{fmtNum(p.price)}</span>}
                     </div>
@@ -1610,11 +1626,18 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar }) {
                     <tr key={p.id} className={`hover:bg-slate-50/50 group transition-colors ${isStale ? 'bg-amber-50/30' : ''}`}>
                       <td className="p-4">
                         <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
-                            {isStale && <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-white animate-pulse"></div>}
+                          <div className="relative" onClick={e => e.stopPropagation()}>
+                            {classifyingId === p.id || !p.category ? (
+                              <div className="flex items-center gap-0.5 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
+                                {['A','B','C','D'].map(c => { const ci = getAbcdInfo(c); return (<button key={c} onClick={() => quickClassify(p.id, c)} title={`จัดเป็น ${c}`} className={`w-6 h-6 rounded-md font-bold text-[10px] transition-all ${p.category === c ? `${ci.bg} text-white shadow-sm` : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'}`}>{c}</button>); })}
+                                {p.category && <button onClick={() => setClassifyingId(null)} title="ยกเลิก" className="w-5 h-6 text-slate-400 hover:text-slate-700"><X className="w-3 h-3 mx-auto"/></button>}
+                              </div>
+                            ) : (
+                              <button onClick={() => setClassifyingId(p.id)} title="คลิกเปลี่ยนหมวด" className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0 hover:ring-2 hover:ring-emerald-300 transition-all`}>{catInfo.short}</button>
+                            )}
+                            {isStale && <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-white animate-pulse pointer-events-none"></div>}
                           </div>
-                          <div className="truncate max-w-[200px] xl:max-w-[300px]">
+                          <div className="truncate max-w-[200px] xl:max-w-[300px] cursor-pointer" onClick={() => onSelect(p.id)}>
                             <span className={`font-display font-bold text-sm group-hover:text-emerald-950 block truncate ${isStale ? 'text-amber-900' : 'text-slate-800'}`}>{p.name || '-'}</span>
                             <span className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">{p.brand || '-'} {p.isShopAds && <span className="text-rose-500 font-bold ml-1">· 🛒 Ads</span>}</span>
                           </div>
