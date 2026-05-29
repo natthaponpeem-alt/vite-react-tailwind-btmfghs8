@@ -1522,7 +1522,7 @@ function TriageModePage({ products, clips, onUpdate, onBack }) {
     const s = calcScore(sc);
     onUpdate(current.id, {
       category: category || null,
-      scorecard: sanitizeForFirestore(sc),
+      scorecard: sc,
       score: s.total, maxScore: s.max, scorePct: s.pct,
       decision: getDecision(s.pct),
       lastScoredAt: new Date().toISOString()
