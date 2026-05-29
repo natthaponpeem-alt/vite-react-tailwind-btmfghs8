@@ -1127,85 +1127,42 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
-      {/* ─── TIER 2: UNFAIR ADVANTAGE ENGINE (Commitment + Discovery) ────── */}
-      {(unfairAdvantage.locked.length > 0 || unfairAdvantage.discovery.length > 0) && (
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-5">
-          <div className="flex items-center justify-between flex-wrap gap-2">
+      {/* ─── TIER 2B: LOCKED COMMITMENTS (Phase C.1 — Discovery removed, compact rows) ────── */}
+      {unfairAdvantage.locked.length > 0 && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
             <div>
-              <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#d9eb54]" /> 💎 This Week's Focus
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">คำมั่นที่ Lock ไว้ + โอกาสใหม่ที่น่าทุ่ม</p>
+              <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2"><Lock className="w-4 h-4 text-[#d9eb54]" /> Locked Commitments</h3>
+              <p className="text-xs text-slate-400 mt-0.5">คำมั่นเดือนนี้ — ตามทันเป้าหรือยัง</p>
             </div>
+            <span className="text-[10px] bg-lime-50 text-[#012b25] font-bold px-2.5 py-1 rounded-full">{unfairAdvantage.locked.length} สินค้า · เหลือลง {unfairAdvantage.locked.reduce((s, l) => s + l.behind, 0)} คลิป</span>
           </div>
-
-          {/* ── COMMITMENTS: ทุกตัวที่ Lock ── */}
-          {unfairAdvantage.locked.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-[11px] font-bold text-[#012b25] uppercase tracking-wider"><Lock className="w-3.5 h-3.5 text-[#d9eb54]" /> Locked Commitments ({unfairAdvantage.locked.length})</div>
-              {unfairAdvantage.locked.map((s) => {
-                const catInfo = getAbcdInfo(s.product.category);
-                const statusBadge = s.lockStatus === 'done' ? { t: '✓ ครบแล้ว', c: 'bg-emerald-100 text-emerald-800' } : s.lockStatus === 'notStarted' ? { t: '🔴 ยังไม่เริ่ม', c: 'bg-rose-100 text-rose-700' } : s.lockStatus === 'behind' ? { t: '⚠️ ตามหลัง', c: 'bg-amber-100 text-amber-800' } : { t: 'on track', c: 'bg-sky-100 text-sky-700' };
-                return (
-                  <div key={s.product.id} className="bg-lime-50/40 hover:bg-lime-50 rounded-2xl transition-all border border-lime-100 group p-4 space-y-2.5">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
-                      <div className="flex-1 min-w-0">
-                        <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left block w-full">{s.product.name}</button>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${statusBadge.c}`}>{statusBadge.t}</span>
-                          <span className="text-[10px] text-slate-500 font-mono font-bold">{s.done}/{s.target} คลิป</span>
-                        </div>
-                      </div>
-                      <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1"><Plus className="w-3 h-3" /> คลิป</button>
-                    </div>
-                    {/* progress bar */}
-                    <div className="ml-12 flex items-center gap-2">
-                      <div className="flex-1 h-2 bg-white rounded-full overflow-hidden border border-lime-100"><div className={`h-full rounded-full ${s.pct >= 100 ? 'bg-emerald-500' : 'bg-[#d9eb54]'}`} style={{ width: `${Math.min(100, s.pct)}%` }} /></div>
-                      <span className="text-[10px] font-mono font-bold text-slate-500">{s.pct}%</span>
-                      {s.behind > 0 && <span className="text-[10px] text-amber-700 font-bold">เหลือ {s.behind}</span>}
-                    </div>
+          <div className="space-y-1">
+            {unfairAdvantage.locked.map((s) => {
+              const catInfo = getAbcdInfo(s.product.category);
+              const isBehind = s.lockStatus === 'behind' || s.lockStatus === 'notStarted';
+              const isDone = s.lockStatus === 'done';
+              const rowBg = isBehind ? 'bg-rose-50/40 hover:bg-rose-50 border-rose-100' : isDone ? 'bg-emerald-50/40 hover:bg-emerald-50 border-emerald-100' : 'bg-slate-50/60 hover:bg-slate-50 border-slate-100';
+              const barColor = isDone ? 'bg-emerald-500' : isBehind ? 'bg-rose-400' : 'bg-[#d9eb54]';
+              const statusBadge = isDone ? { t: '✓ ครบ', c: 'bg-emerald-100 text-emerald-800' } : s.lockStatus === 'notStarted' ? { t: '🔴 ยังไม่เริ่ม', c: 'bg-rose-100 text-rose-700' } : isBehind ? { t: `⚠ ตามหลัง ${s.behind}`, c: 'bg-amber-100 text-amber-800' } : { t: 'ทันเป้า', c: 'bg-sky-100 text-sky-700' };
+              return (
+                <div key={s.product.id} className={`group flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all ${rowBg}`}>
+                  <div className={`w-6 h-6 rounded-md ${catInfo.bg} text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0`}>{catInfo.short}</div>
+                  <button onClick={() => onSelectProduct(s.product.id)} className="flex-1 min-w-0 text-left">
+                    <div className="text-xs font-semibold text-[#012b25] truncate group-hover:text-emerald-800">{s.product.name}</div>
+                  </button>
+                  {/* Inline progress bar (desktop only) */}
+                  <div className="hidden md:flex items-center gap-1.5 flex-shrink-0">
+                    <div className="w-20 h-1.5 bg-white rounded-full overflow-hidden border border-slate-100"><div className={`h-full ${barColor} transition-all`} style={{ width: `${Math.min(100, s.pct)}%` }} /></div>
+                    <span className="text-[10px] font-mono font-bold text-slate-500 w-8 text-right">{s.pct}%</span>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* ── DISCOVERY: Top 5 ที่ยังไม่ Lock ── */}
-          {unfairAdvantage.discovery.length > 0 && (
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center gap-2 text-[11px] font-bold text-[#012b25] uppercase tracking-wider border-t border-slate-100 pt-4"><Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Opportunities — น่า Lock เพิ่ม ({unfairAdvantage.discovery.length})</div>
-              {unfairAdvantage.discovery.map((s, idx) => {
-                const catInfo = getAbcdInfo(s.product.category);
-                return (
-                  <div key={s.product.id} className="bg-slate-50 hover:bg-slate-100 rounded-2xl transition-all border border-slate-100/60 group p-4 space-y-2.5">
-                    <div className="flex items-center gap-3">
-                      <div className="font-display text-xl text-slate-300 w-6 text-center flex-shrink-0 group-hover:text-[#012b25] transition-colors">#{idx+1}</div>
-                      <div className={`w-9 h-9 rounded-xl ${catInfo.bg} text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-sm`}>{catInfo.short}</div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => onSelectProduct(s.product.id)} className="font-semibold text-sm text-slate-800 hover:text-emerald-800 truncate text-left">{s.product.name}</button>
-                          {!s.isReviewed && <span className="text-[9px] bg-sky-100 text-sky-700 font-bold px-1.5 py-0.5 rounded-md flex-shrink-0" title="ยังไม่ได้ review — อาจเป็นทองคำที่ยังไม่จับตา">🌱 ยังไม่ review</span>}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${s.tierColor}`}>{s.tier}</span>
-                          <span className="text-[10px] text-violet-700 font-mono font-bold">~฿{fmtNum(s.estCommission)}/เดือน</span>
-                        </div>
-                      </div>
-                      <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-xs px-3 py-2 rounded-xl shadow-sm transition-all flex-shrink-0 flex items-center gap-1"><Plus className="w-3 h-3" /> คลิป</button>
-                    </div>
-                    <div className="flex flex-wrap gap-1 ml-9">
-                      {s.breakdown.map((b, i) => (<span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${b.color}`}>{b.label}</span>))}
-                    </div>
-                    <div className="ml-9 flex flex-wrap items-center gap-3 text-[10px] text-slate-600 pt-1 border-t border-slate-100">
-                      <div className="flex items-center gap-1"><Target className="w-3 h-3 text-emerald-700" /><span className="font-bold">{s.recommendedClips} คลิป/wk</span></div>
-                      <div className="text-slate-400 italic">{s.advice}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  <div className="flex-shrink-0 font-mono font-bold text-xs text-[#012b25] w-12 text-right">{s.done}/{s.target}</div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex-shrink-0 whitespace-nowrap ${statusBadge.c}`}>{statusBadge.t}</span>
+                  <button onClick={() => onPickToPost && onPickToPost(s.product.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity"><Plus className="w-3 h-3" /></button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
