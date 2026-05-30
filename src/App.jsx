@@ -309,6 +309,36 @@ function getUnfairAdvantage(products, clips) {
 
 // ─── PHASE D — SMART QUOTA ALLOCATOR ───────────────────────────────────
 // แบ่งคลิปตามเงินคอมที่ได้จริง (GMV × คอม%) + safety constraints
+// ─── PHASE C.2 — DAILY MIX ADVISOR ─────────────────────────────────────
+// แนะนำ ABCD distribution วันนี้ตามสัดส่วน 60/25/10/5 + V≥1
+function getTodayMix(monthlyTarget, clips, products) {
+  const today = new Date().toISOString().slice(0,10);
+  const todayClips = Array.isArray(clips) ? clips.filter(c => c.postedAt?.slice(0,10) === today) : [];
+  const dailyTotal = Math.max(1, Math.ceil(monthlyTarget / 30));
+  // V reserve: 1/day ถ้า daily total >= 3
+  const targetV = dailyTotal >= 3 ? 1 : 0;
+  const productClips = Math.max(0, dailyTotal - targetV);
+  // ABCD: 60/25/10/5
+  const targetA = Math.round(productClips * 0.60);
+  const targetB = Math.round(productClips * 0.25);
+  const targetC = Math.round(productClips * 0.10);
+  const targetD = Math.max(0, productClips - targetA - targetB - targetC);
+  // นับที่ลงไปแล้ววันนี้
+  const productById = new Map(Array.isArray(products) ? products.map(p => [p.id, p]) : []);
+  const done = { A: 0, B: 0, C: 0, D: 0, V: 0 };
+  todayClips.forEach(c => {
+    if (c.isV) done.V++;
+    else {
+      const cat = productById.get(c.productId)?.category;
+      if (cat && done[cat] !== undefined) done[cat]++;
+    }
+  });
+  const target = { A: targetA, B: targetB, C: targetC, D: targetD, V: targetV };
+  const totalDone = Object.values(done).reduce((s, v) => s + v, 0);
+  const totalTarget = Object.values(target).reduce((s, v) => s + v, 0);
+  return { target, done, dailyTotal, totalDone, totalTarget };
+}
+
 function getQuotaSuggestions(lockedProducts, clips, monthlyBudget = 150) {
   const reserveV = Math.floor(monthlyBudget * 0.10);
   const reserveExplore = Math.floor(monthlyBudget * 0.10);
@@ -1012,6 +1042,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 
   // ─── TIER 1: Today's Mission ────────────────────────────────────────────
   const mission = useMemo(() => getTodayMission(clips, appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET), [clips, appSettings]);
+  const todayMix = useMemo(() => getTodayMix(appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET, clips, products), [appSettings, clips, products]);
   // ─── TIER 2: What to Post Today ─────────────────────────────────────────
   const postSuggestions = useMemo(() => getPostTodaySuggestions(products, clips), [products, clips]);
   // ─── TIER 2A: This Week's Focus (ABCD boxes — Phase C.1) ───────────────
@@ -1114,6 +1145,40 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           </div>
         </div>
       )}
+
+      {/* ─── TIER 1B: DAILY MIX ADVISOR (Phase C.2) ─────────────────────── */}
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2">🎨 Mix แนะนำวันนี้</h3>
+            <p className="text-xs text-slate-400 mt-0.5">เป้า {todayMix.dailyTotal} คลิป · กระจาย ABCD 60/25/10/5 + V≥1</p>
+          </div>
+          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${todayMix.totalDone >= todayMix.totalTarget ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+            {todayMix.totalDone >= todayMix.totalTarget ? '✓ ครบมิกซ์แล้ว' : `ทำแล้ว ${todayMix.totalDone}/${todayMix.totalTarget}`}
+          </span>
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          {['A','B','C','D','V'].map(k => {
+            const t = todayMix.target[k] || 0;
+            const d = todayMix.done[k] || 0;
+            const isV = k === 'V';
+            const ci = isV ? { bg: 'bg-[#012b25]', short: 'V' } : getAbcdInfo(k);
+            const isMet = t > 0 && d >= t;
+            const isNeeded = t > 0 && d < t;
+            const isZero = t === 0;
+            const cardBg = isMet ? 'bg-emerald-50 border-emerald-200' : isNeeded ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100';
+            return (
+              <div key={k} className={`rounded-2xl p-3 text-center border ${cardBg}`}>
+                <div className={`w-7 h-7 mx-auto rounded-md ${ci.bg} text-white flex items-center justify-center font-bold text-xs mb-1.5 shadow-sm`}>{ci.short}</div>
+                <div className="font-mono text-sm font-bold text-[#012b25]">{d}/{t}</div>
+                <div className="text-[9px] mt-1 font-bold">
+                  {isMet ? <span className="text-emerald-700">✓ ครบ</span> : isNeeded ? <span className="text-amber-700">ขาด {t-d}</span> : isZero ? <span className="text-slate-300">—</span> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* ─── TIER 2A: THIS WEEK'S FOCUS — ABCD BOXES (Phase C.1) ────────── */}
       {thisWeekFocus.some(b => b.total > 0) && (
@@ -3170,13 +3235,19 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
         const commIdx = headers.indexOf('มาตรฐาน');
         const orderTypeIdx = headers.indexOf('ประเภทคำสั่งซื้อ');
         const shopAdsIdx = headers.indexOf('โฆษณาร้านค้า');
+        // ✅ NEW: filter "ไม่มีสิทธิ์" (cancelled / ineligible) orders → ป้องกัน GMV เกินจริง
+        const statusIdx = headers.indexOf('สถานะการชำระคำสั่งซื้อ');
 
         if (idIdx === -1 || gmvIdx === -1) { showToast('หาคอลัมน์ "รหัสสินค้า" หรือ "GMV" ไม่เจอ', 'error'); setIsProcessing(false); return; }
 
         const aggregated = {};
+        let filteredCount = 0; let totalRows = 0;
         for (let i = 1; i < rows.length; i++) {
           if (!rows[i].trim()) continue;
+          totalRows++;
           const cols = parseRow(rows[i]).map(c => c.trim().replace(/^"|"$/g, ''));
+          // ✅ FILTER: skip cancelled/ineligible orders (status="ไม่มีสิทธิ์") เพื่อให้ GMV ตรงกับ Eligible
+          if (statusIdx >= 0 && cols[statusIdx] === 'ไม่มีสิทธิ์') { filteredCount++; continue; }
           const pId = cols[idIdx]; if (!pId) continue;
           
           let gmvVal = Number((cols[gmvIdx] || '0').replace(/,/g, '')); if (isNaN(gmvVal)) gmvVal = 0;
@@ -3215,6 +3286,11 @@ function TikTokRadarModal({ products, onClose, onUpdateProduct, onQuickAdd, show
         
         matched.sort((a,b) => b.totalGmv - a.totalGmv); ghosts.sort((a,b) => b.totalGmv - a.totalGmv);
         setParsedData({ matched, ghosts });
+        // ✅ Summary toast — โปร่งใสว่า parser ทำอะไร
+        const productCount = matched.length + ghosts.length;
+        const eligibleRows = totalRows - filteredCount;
+        const filterMsg = filteredCount > 0 ? ` · กรอง "ไม่มีสิทธิ์" ${filteredCount} ออก` : '';
+        showToast(`✓ ${totalRows} orders${filterMsg} → ${eligibleRows} eligible · ${productCount} สินค้า`);
       } catch (e) { showToast('เกิดข้อผิดพลาดในการอ่านข้อมูล', 'error'); }
       setIsProcessing(false);
     }, 500);
