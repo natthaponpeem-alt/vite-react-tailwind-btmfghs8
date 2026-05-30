@@ -318,11 +318,26 @@ function getTodayMix(monthlyTarget, clips, products) {
   // V reserve: 1/day ถ้า daily total >= 3
   const targetV = dailyTotal >= 3 ? 1 : 0;
   const productClips = Math.max(0, dailyTotal - targetV);
-  // ABCD: 60/25/10/5
-  const targetA = Math.round(productClips * 0.60);
-  const targetB = Math.round(productClips * 0.25);
-  const targetC = Math.round(productClips * 0.10);
-  const targetD = Math.max(0, productClips - targetA - targetB - targetC);
+
+  // ─ Largest Remainder Method (LRM) ─
+  // แก้ bug C=0/0 — ใช้ floor + แจกเศษให้ category ที่ remainder สูง
+  // Variety bias: เมื่อ tie → C/D ได้ก่อน (ป้องกันถูกตัดออก) + สลับวันคู่/คี่
+  const ratios = { A: 0.60, B: 0.25, C: 0.10, D: 0.05 };
+  const raw = { A: productClips * 0.60, B: productClips * 0.25, C: productClips * 0.10, D: productClips * 0.05 };
+  const floored = { A: Math.floor(raw.A), B: Math.floor(raw.B), C: Math.floor(raw.C), D: Math.floor(raw.D) };
+  const frac = { A: raw.A - floored.A, B: raw.B - floored.B, C: raw.C - floored.C, D: raw.D - floored.D };
+  let allocated = floored.A + floored.B + floored.D + floored.C;
+  const remaining = productClips - allocated;
+  // วันคู่/คี่ — D goes first ในวันคี่, C ก่อนวันคู่
+  const dayNum = new Date().getDate();
+  const tieOrder = dayNum % 2 === 0 ? ['C','D','B','A'] : ['D','C','A','B'];
+  const sorted = Object.keys(frac).sort((a,b) => {
+    if (frac[b] !== frac[a]) return frac[b] - frac[a];
+    return tieOrder.indexOf(a) - tieOrder.indexOf(b);
+  });
+  const target = { A: floored.A, B: floored.B, C: floored.C, D: floored.D, V: targetV };
+  for (let i = 0; i < remaining; i++) target[sorted[i % sorted.length]]++;
+
   // นับที่ลงไปแล้ววันนี้
   const productById = new Map(Array.isArray(products) ? products.map(p => [p.id, p]) : []);
   const done = { A: 0, B: 0, C: 0, D: 0, V: 0 };
@@ -333,7 +348,6 @@ function getTodayMix(monthlyTarget, clips, products) {
       if (cat && done[cat] !== undefined) done[cat]++;
     }
   });
-  const target = { A: targetA, B: targetB, C: targetC, D: targetD, V: targetV };
   const totalDone = Object.values(done).reduce((s, v) => s + v, 0);
   const totalTarget = Object.values(target).reduce((s, v) => s + v, 0);
   return { target, done, dailyTotal, totalDone, totalTarget };
@@ -1159,15 +1173,15 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
 
       {activeTab === 'today' && (<>
 
-      {/* ─── TIER 1B: DAILY MIX ADVISOR (Phase C.2) ─────────────────────── */}
+      {/* ─── TIER 1B: DAILY MIX ADVISOR (Phase C.2 — redesigned clean) ─── */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
-            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2">🎨 Mix แนะนำวันนี้</h3>
-            <p className="text-xs text-slate-400 mt-0.5">เป้า {todayMix.dailyTotal} คลิป · กระจาย ABCD 60/25/10/5 + V≥1</p>
+            <h3 className="font-display text-base text-[#012b25]">Mix วันนี้</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">เป้า {todayMix.dailyTotal} คลิป · ABCD 60/25/10/5 + V</p>
           </div>
-          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${todayMix.totalDone >= todayMix.totalTarget ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-            {todayMix.totalDone >= todayMix.totalTarget ? '✓ ครบมิกซ์แล้ว' : `ทำแล้ว ${todayMix.totalDone}/${todayMix.totalTarget}`}
+          <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${todayMix.totalDone >= todayMix.totalTarget ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-slate-100 text-slate-600'}`}>
+            {todayMix.totalDone}/{todayMix.totalTarget}
           </span>
         </div>
         <div className="grid grid-cols-5 gap-2">
@@ -1179,13 +1193,14 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
             const isMet = t > 0 && d >= t;
             const isNeeded = t > 0 && d < t;
             const isZero = t === 0;
-            const cardBg = isMet ? 'bg-emerald-50 border-emerald-200' : isNeeded ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100';
+            // Calmer aesthetic — neutral slate for missing (no yellow), subtle green for met
+            const cardBg = isMet ? 'bg-emerald-50/60 border-emerald-100' : isZero ? 'bg-slate-50/40 border-slate-100' : 'bg-slate-50 border-slate-100';
             return (
               <div key={k} className={`rounded-2xl p-3 text-center border ${cardBg}`}>
                 <div className={`w-7 h-7 mx-auto rounded-md ${ci.bg} text-white flex items-center justify-center font-bold text-xs mb-1.5 shadow-sm`}>{ci.short}</div>
                 <div className="font-mono text-sm font-bold text-[#012b25]">{d}/{t}</div>
-                <div className="text-[9px] mt-1 font-bold">
-                  {isMet ? <span className="text-emerald-700">✓ ครบ</span> : isNeeded ? <span className="text-amber-700">ขาด {t-d}</span> : isZero ? <span className="text-slate-300">—</span> : null}
+                <div className="text-[10px] mt-1 font-medium">
+                  {isMet ? <span className="text-emerald-600">✓</span> : isNeeded ? <span className="text-slate-500">ขาด {t-d}</span> : isZero ? <span className="text-slate-300">—</span> : null}
                 </div>
               </div>
             );
@@ -1935,6 +1950,21 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdat
       if (['PICK', 'WAIT', 'DROP'].includes(filter.toUpperCase()) && p.decision?.toUpperCase() !== filter.toUpperCase()) return false;
       if (filter === 'locked' && !p.locked) return false;
       if (filter === 'selling' && monthGMV(p) <= 0) return false;
+      if (filter === 'passive') {
+        if (!p.category || p.locked || p.decision === 'DROP') return false;
+        if (monthGMV(p) <= 0) return false;
+      }
+      if (filter === 'dropCandidate') {
+        if (!p.category || p.locked || p.decision === 'DROP') return false;
+        const now = new Date();
+        const m1 = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+        const lm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+        const m2 = `${lm.getFullYear()}-${String(lm.getMonth()+1).padStart(2,'0')}`;
+        const s1 = Number(p.salesData?.monthly?.[m1]) || 0;
+        const s2 = Number(p.salesData?.monthly?.[m2]) || 0;
+        const hadHistory = Object.values(p.salesData?.monthly || {}).some(v => Number(v) > 0);
+        if (!(hadHistory && s1 === 0 && s2 === 0)) return false;
+      }
       if (['A', 'B', 'C', 'D'].includes(filter) && p.category !== filter) return false;
       if (typeFilter !== 'all' && p.productType !== typeFilter) return false;
       return true;
@@ -1955,6 +1985,31 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdat
   const dropProducts = products.filter(p => p.decision === 'DROP');
   const sellingCount = products.filter(p => monthGMV(p) > 0).length;
 
+  // S11 — Passive Earners: ตั้งหมวด + ไม่ Lock + ขายได้ + ไม่ DROP
+  const passiveEarners = useMemo(() => products.filter(p => {
+    if (!p.category) return false;
+    if (p.locked) return false;
+    if (p.decision === 'DROP') return false;
+    return monthGMV(p) > 0;
+  }), [products, clips, gmvMonth]);
+
+  // S12 — DROP Candidates: ฿0 sales 2 เดือนติด + เคยขายได้ก่อนหน้า + ไม่ DROP
+  const dropCandidates = useMemo(() => {
+    const now = new Date();
+    const m1 = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const lm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const m2 = `${lm.getFullYear()}-${String(lm.getMonth()+1).padStart(2,'0')}`;
+    return products.filter(p => {
+      if (!p.category) return false;
+      if (p.decision === 'DROP') return false;
+      if (p.locked) return false;  // ตัว Lock ผู้ใช้ตั้งใจ — อย่า nag
+      const sales1 = Number(p.salesData?.monthly?.[m1]) || 0;
+      const sales2 = Number(p.salesData?.monthly?.[m2]) || 0;
+      const hadHistory = Object.values(p.salesData?.monthly || {}).some(v => Number(v) > 0);
+      return hadHistory && sales1 === 0 && sales2 === 0;
+    });
+  }, [products]);
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
@@ -1964,6 +2019,20 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdat
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm flex items-center justify-between cursor-pointer hover:bg-rose-50 transition-colors" onClick={() => setFilter('drop')} title="สินค้าที่ตัดสินใจว่าจะตัด"><div><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Drop Items</span><div className="font-display text-2xl text-[#dc2626] mt-1">{dropProducts.length}</div><div className="text-[10px] text-slate-400 mt-0.5">DROP decision</div></div><div className="p-3 bg-rose-50 text-rose-500 rounded-2xl"><X className="w-5 h-5" /></div></div>
       </div>
 
+      {/* S12 — DROP Candidates Alert (only when has candidates) */}
+      {dropCandidates.length > 0 && (
+        <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-4 shadow-sm flex items-center justify-between gap-4 cursor-pointer hover:bg-rose-50 transition-colors" onClick={() => setFilter('dropCandidate')}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2.5 bg-rose-100 rounded-2xl flex-shrink-0"><AlertTriangle className="w-4 h-4 text-rose-600" /></div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-rose-800">{dropCandidates.length} สินค้าไม่ขายมา 2 เดือนแล้ว</div>
+              <div className="text-[11px] text-rose-600/80 mt-0.5">เคยขายได้แต่หยุดสนิท — ตรวจสอบเพื่อ DROP</div>
+            </div>
+          </div>
+          <span className="text-xs font-bold text-rose-700 bg-white px-3 py-1.5 rounded-full border border-rose-200 flex-shrink-0">ตรวจสอบ →</span>
+        </div>
+      )}
+
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="relative flex-1"><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search for items..." className="w-full pl-10 pr-4 py-2.5 bg-[#f3f6f5] border border-transparent rounded-full text-xs focus:outline-none focus:border-emerald-700 focus:bg-white transition-all shadow-inner" /><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /></div>
@@ -1971,7 +2040,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdat
             {pendingProducts.length > 0 && <button onClick={onTriage} className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Search className="w-3.5 h-3.5" /> 🔍 Triage ({pendingProducts.length})</button>}
             <button onClick={onOpenRadar} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> สแกนเรดาร์ TikTok</button>
             <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Product</button>
-            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="pending">🌱 รอจัดหมวด ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WATCH</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
+            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="passive">🌱 Passive Earners ({passiveEarners.length})</option><option value="dropCandidate">💀 DROP Candidates ({dropCandidates.length})</option><option value="pending">🌱 รอจัดหมวด ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WATCH</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
             <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกหมวดหมู่</option>{PRODUCT_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select>
           </div>
         </div>
