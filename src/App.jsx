@@ -50,7 +50,7 @@ const ABCD_INFO = {
   V: { label: 'V — Content', short: 'V', desc: 'คลิปให้คุณค่า/ความรู้', bg: 'bg-slate-500', text: 'text-slate-500', border: 'border-slate-100', lightBg: 'bg-slate-50/50' },
 };
 
-const DECISION_INFO = { PICK: { label: 'PICK', bg: 'bg-[#e2f7e4]', text: 'text-[#1d7c2a]' }, WAIT: { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' }, DROP: { label: 'DROP', bg: 'bg-[#fee2e2]', text: 'text-[#dc2626]' } };
+const DECISION_INFO = { PICK: { label: 'PICK', bg: 'bg-[#e2f7e4]', text: 'text-[#1d7c2a]' }, WAIT: { label: 'WATCH', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' }, DROP: { label: 'DROP', bg: 'bg-[#fee2e2]', text: 'text-[#dc2626]' } };
 const PRODUCT_TYPES = [{ id: 'supplement', label: 'อาหารเสริม', emoji: '💊' }, { id: 'shoes', label: 'รองเท้ากีฬา', emoji: '👟' }, { id: 'equipment', label: 'อุปกรณ์ฟิตเนส', emoji: '🏋️' }, { id: 'apparel', label: 'ชุดออกกำลังกาย', emoji: '👕' }, { id: 'other', label: 'อื่นๆ', emoji: '📦' }];
 const SPLITTER_OPTIONS = { persona: ['คนอ้วน', 'ผู้หญิง', 'มือใหม่', 'พนักงานออฟฟิศ', 'คนแก่/วัยกลางคน', 'คนเดินเยอะ', 'นักวิ่ง', 'คนลดน้ำหนัก', 'คนเล่นเวท'], situation: ['เดินห้าง', 'วิ่งลู่', 'เดินงาน', 'เที่ยว', 'คาร์ดิโอ', 'เข้ายิม', 'เดินสวน', 'ทำงานออฟฟิศ', 'ก่อนนอน', 'หลังตื่นนอน'], emotion: ['กลัวเจ็บ', 'ขี้เกียจเพราะเจ็บ', 'อยากเริ่มใหม่', 'อยากผอม', 'เหนื่อยจากงาน', 'อยากดูดี', 'อยากแข็งแรง', 'หมดหวังกับร่างกาย'], format: ['POV', 'Story', 'Talking Head', 'Review', 'Compare', 'Voice Over', 'How-to', 'Listicle', 'Before/After'] };
 const PAIN_SOURCES = [{ id: 'shopee', label: '💬 Shopee/Lazada' }, { id: 'tiktok', label: '🔍 TikTok "แต่..."' }, { id: 'pantip', label: '💭 Pantip/Groups' }, { id: 'ai', label: '🤖 AI Persona Simulation' }, { id: 'personal', label: '👤 ประสบการณ์ตรง' }];
@@ -74,7 +74,7 @@ const getAbcdInfo = (cat) => {
 };
 const getDecisionInfo = (dec) => {
   if (!dec) return { label: 'รอจัด', bg: 'bg-slate-100', text: 'text-slate-500' };
-  return DECISION_INFO[dec] || { label: 'WAIT', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
+  return DECISION_INFO[dec] || { label: 'WATCH', bg: 'bg-[#fef3c7]', text: 'text-[#d97706]' };
 };
 const getProductTypeInfo = (typeId) => PRODUCT_TYPES.find(t => t.id === typeId) || { id: 'other', label: 'อื่นๆ', emoji: '📦' };
 
@@ -305,6 +305,48 @@ function getUnfairAdvantage(products, clips) {
     .slice(0, 6);
 
   return { locked, discovery };
+}
+
+// ─── PHASE D — SMART QUOTA ALLOCATOR ───────────────────────────────────
+// แบ่งคลิปตามเงินคอมที่ได้จริง (GMV × คอม%) + safety constraints
+function getQuotaSuggestions(lockedProducts, clips, monthlyBudget = 150) {
+  const reserveV = Math.floor(monthlyBudget * 0.10);
+  const reserveExplore = Math.floor(monthlyBudget * 0.10);
+  const lockedBudget = monthlyBudget - reserveV - reserveExplore;
+  const MIN_CLIPS = 3;
+  const MAX_CLIPS = Math.max(MIN_CLIPS, Math.floor(lockedBudget * 0.30));
+
+  if (!Array.isArray(lockedProducts) || lockedProducts.length === 0) {
+    return { items: [], reserveV, reserveExplore, lockedBudget, monthlyBudget, totalWeight: 0, totalSuggested: 0, anyChange: false };
+  }
+
+  const items = lockedProducts.map(p => {
+    const recent = getRecentGMV(p, clips).best;
+    const commission = Number(p.scorecard?.commission) || 0;
+    const rawWeight = (recent * commission) / 100;
+    const weight = Math.max(rawWeight, 1);  // floor 1 to prevent zero-share
+    const currentTarget = Number(p.locked?.targetClips) || 10;
+    return { p, recent, commission, weight, rawWeight, estComm: Math.round(rawWeight), currentTarget };
+  });
+
+  const totalWeight = items.reduce((s, i) => s + i.weight, 0);
+
+  items.forEach(i => {
+    const raw = (i.weight / totalWeight) * lockedBudget;
+    const target = Math.max(MIN_CLIPS, Math.min(MAX_CLIPS, Math.round(raw)));
+    i.suggestedTarget = target;
+    i.delta = target - i.currentTarget;
+    // A-Light = volume สูง + คอมต่ำ + อยู่หมวด A → ลงเยอะไม่คุ้ม
+    i.isALight = i.recent >= 10000 && i.commission > 0 && i.commission < 10 && i.p.category === 'A';
+  });
+
+  // Sort by suggestedTarget desc (winners first)
+  items.sort((a, b) => b.suggestedTarget - a.suggestedTarget);
+
+  const totalSuggested = items.reduce((s, i) => s + i.suggestedTarget, 0);
+  const anyChange = items.some(i => i.delta !== 0);
+
+  return { items, reserveV, reserveExplore, lockedBudget, monthlyBudget, totalWeight, totalSuggested, anyChange };
 }
 
 function getThisWeekFocus(products, clips) {
@@ -753,7 +795,7 @@ export default function App() {
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} onUpdate={updateProductInCloud} onTriage={() => setPage('triage')} />)}
           {page === 'triage' && (<TriageModePage products={products} clips={clips} onUpdate={updateProductInCloud} onBack={() => setPage('products')} showToast={showToast} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
-          {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} />)}
+          {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} appSettings={appSettings} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} onUpdate={updateProductInCloud} showToast={showToast} />)}
           {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
           {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} />)}
         </div>
@@ -1512,6 +1554,7 @@ function TriageModePage({ products, clips, onUpdate, onBack, showToast }) {
 
   const goNext = () => setIdx(i => Math.min(i + 1, list.length));
   const goPrev = () => setIdx(i => Math.max(0, i - 1));
+  const [confirmDrop, setConfirmDrop] = useState(false);
 
   // Mark as reviewed locally (instant) + write to Firestore (async in background)
   // idx stays same → next product slides into position naturally
@@ -1540,9 +1583,15 @@ function TriageModePage({ products, clips, onUpdate, onBack, showToast }) {
 
   const handleDrop = () => {
     if (!current) return;
+    setConfirmDrop(true);
+  };
+
+  const actuallyDrop = () => {
+    if (!current) return;
     onUpdate(current.id, { decision: 'DROP', lastScoredAt: new Date().toISOString() });
     if (showToast) showToast(`✕ DROP "${(current.name || '').slice(0, 30)}${(current.name || '').length > 30 ? '…' : ''}"`, 'error');
     markReviewed(current.id);
+    setConfirmDrop(false);
   };
 
   const handleSkip = () => goNext(); // only skip actually advances idx
@@ -1550,6 +1599,12 @@ function TriageModePage({ products, clips, onUpdate, onBack, showToast }) {
   useEffect(() => {
     const handler = (e) => {
       if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+      // When confirm dialog open: Enter = confirm, Esc = cancel, others ignored
+      if (confirmDrop) {
+        if (e.key === 'Enter') { e.preventDefault(); actuallyDrop(); }
+        else if (e.key === 'Escape') setConfirmDrop(false);
+        return;
+      }
       if (e.key === 'ArrowRight') goNext();
       else if (e.key === 'ArrowLeft') goPrev();
       else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); }
@@ -1558,7 +1613,7 @@ function TriageModePage({ products, clips, onUpdate, onBack, showToast }) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [current?.id, sc, category, idx, list.length]);
+  }, [current?.id, sc, category, idx, list.length, confirmDrop]);
 
   if (list.length === 0 || idx >= list.length) {
     return (
@@ -1720,6 +1775,37 @@ function TriageModePage({ products, clips, onUpdate, onBack, showToast }) {
         </div>
         <p className="text-center text-[10px] text-slate-400 pb-4">⌨️ ←→ นำทาง · Enter = บันทึก · D = DROP · Esc = ข้าม</p>
       </div>
+
+      {/* DROP confirmation modal */}
+      {confirmDrop && current && (() => {
+        const estLoss = Math.round(rg.best * (Number(current.scorecard?.commission) || 0) / 100);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center flex-shrink-0"><AlertTriangle className="w-5 h-5 text-rose-600" /></div>
+                <div className="flex-1">
+                  <h3 className="font-display text-lg text-[#012b25]">ยืนยัน DROP สินค้านี้?</h3>
+                  <p className="text-sm text-slate-600 mt-1 truncate">{current.name}</p>
+                </div>
+              </div>
+              {rg.best > 0 && estLoss >= 100 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 mb-4">
+                  <div className="text-xs text-amber-900 leading-relaxed">
+                    ⚠️ <strong>สินค้านี้ยังขายได้ ~฿{fmtNum(estLoss)}/เดือน</strong> (organic + ads)
+                    <br/><span className="text-amber-700">DROP = หยุดติดตาม + ไม่โผล่ใน Opportunities — แน่ใจไหม?</span>
+                  </div>
+                </div>
+              )}
+              <p className="text-[10px] text-slate-400 text-center mb-3">⌨️ Enter = ยืนยัน · Esc = ยกเลิก</p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmDrop(false)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm py-3 rounded-2xl transition-colors">ยกเลิก</button>
+                <button onClick={actuallyDrop} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm py-3 rounded-2xl shadow-md transition-colors">ยืนยัน DROP</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1799,7 +1885,7 @@ function ProductHubPage({ products, clips, onAdd, onSelect, onOpenRadar, onUpdat
             {pendingProducts.length > 0 && <button onClick={onTriage} className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Search className="w-3.5 h-3.5" /> 🔍 Triage ({pendingProducts.length})</button>}
             <button onClick={onOpenRadar} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4" /> สแกนเรดาร์ TikTok</button>
             <button onClick={onAdd} className="bg-[#bcd924] hover:bg-[#a9c41d] text-[#0d2a23] font-bold text-xs px-5 py-2.5 rounded-full transition-all shadow-sm flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Product</button>
-            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="pending">🌱 รอจัดหมวด ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WAIT</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
+            <select value={filter} onChange={e=>setFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="scored">✓ Scored ({scoredProducts.length})</option><option value="selling">💰 ขายได้ (มี GMV) ({sellingCount})</option><option value="pending">🌱 รอจัดหมวด ({pendingProducts.length})</option><option value="stale">⏱️ Stale ({staleProducts.length})</option><option value="all">— ทุกตัวรวม pending</option><option value="pick">🟢 PICK</option><option value="wait">🟡 WATCH</option><option value="drop">🔴 DROP</option><option value="locked">🔒 Locked Focus</option><option value="A">หมวด A</option><option value="B">หมวด B</option><option value="C">หมวด C</option><option value="D">หมวด D</option></select>
             <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="bg-[#f3f6f5] border-none text-xs font-bold px-4 py-2.5 rounded-full"><option value="all">ทุกหมวดหมู่</option>{PRODUCT_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}</select>
           </div>
         </div>
@@ -2115,49 +2201,178 @@ function SplitterSection({ product }) {
   );
 }
 
-function LockListPage({ lockedProducts, products, clips, onSelectProduct, onUnlock, onLockNew }) {
+function LockListPage({ lockedProducts, products, clips, appSettings, onSelectProduct, onUnlock, onLockNew, onUpdate, showToast }) {
   const monthKey = currentMonth();
-  const categorizedLocked = useMemo(() => {
-    const result = { HOT: [], STEADY: [], PASSIVE: [] };
-    if (!Array.isArray(products) || !Array.isArray(clips)) return result;
-    ['A', 'B', 'C', 'D'].forEach(cat => {
-      const fullStack = getCategoryStack(products, clips, cat);
-      const lockedIds = new Set(lockedProducts.filter(p => p.category === cat).map(p => p.id));
-      const filteredStack = fullStack.filter(s => lockedIds.has(s.product.id));
-      filteredStack.forEach(s => {
-        if (s.tier === 'HOT') result.HOT.push(s);
-        else if (s.tier === 'STEADY') result.STEADY.push(s);
-        else result.PASSIVE.push(s);
-      });
+  const monthlyBudget = appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET;
+
+  // ─── Phase D: Smart Quota Allocator ─────────────────────────────────
+  const quota = useMemo(() => getQuotaSuggestions(lockedProducts, clips, monthlyBudget), [lockedProducts, clips, monthlyBudget]);
+  const [quotaApplying, setQuotaApplying] = useState(false);
+  const [quotaExpanded, setQuotaExpanded] = useState(true);
+
+  const applyQuotaAll = async () => {
+    if (!onUpdate || quota.items.length === 0) return;
+    setQuotaApplying(true);
+    try {
+      await Promise.all(quota.items.filter(i => i.delta !== 0).map(i => {
+        const newLocked = { ...i.p.locked, targetClips: i.suggestedTarget };
+        return onUpdate(i.p.id, { locked: newLocked });
+      }));
+      if (showToast) showToast(`✓ จัดสรรคลิปใหม่ ${quota.items.filter(i => i.delta !== 0).length} สินค้าตามเงินคอม`);
+    } catch (e) {
+      if (showToast) showToast('เกิดข้อผิดพลาด ลองใหม่', 'error');
+    } finally {
+      setQuotaApplying(false);
+    }
+  };
+
+  const applyQuotaOne = async (item) => {
+    if (!onUpdate) return;
+    const newLocked = { ...item.p.locked, targetClips: item.suggestedTarget };
+    await onUpdate(item.p.id, { locked: newLocked });
+    if (showToast) showToast(`✓ ${item.p.name?.slice(0, 25)}: ${item.currentTarget} → ${item.suggestedTarget}`);
+  };
+
+  // S1: Group by Lock STATUS (behind / on-track / done) — replaces HOT/STEADY/PASSIVE tier
+  const lockedByStatus = useMemo(() => {
+    const ym = currentMonth();
+    const groups = { behind: [], onTrack: [], done: [] };
+    if (!Array.isArray(lockedProducts)) return groups;
+    lockedProducts.forEach(p => {
+      const made = clips.filter(c => c.productId === p.id && c.postedAt?.slice(0,7) === ym).length;
+      const target = Number(p.locked?.targetClips) || 10;
+      const pct = target > 0 ? Math.round((made / target) * 100) : 0;
+      const behind = Math.max(0, target - made);
+      let status = 'onTrack';
+      if (made >= target) status = 'done';
+      else if (made === 0 || behind > target * 0.5) status = 'behind';
+      groups[status].push({ product: p, made, target, pct, behind });
     });
-    return result;
-  }, [products, clips, lockedProducts]);
+    groups.behind.sort((a, b) => b.behind - a.behind);
+    groups.onTrack.sort((a, b) => b.behind - a.behind);
+    groups.done.sort((a, b) => a.product.name?.localeCompare(b.product.name || '') || 0);
+    return groups;
+  }, [clips, lockedProducts]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between"><div><h2 className="font-display text-xl text-slate-800">เป้าหมายยุทธศาสตร์ Lock List เดือนนี้</h2><p className="text-xs text-slate-400">ควบคุมสัดส่วน Content Frequency</p></div><button onClick={onLockNew} className="bg-[#012b25] text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-sm">+ ล็อกเป้าหมายเพิ่ม</button></div>
+
+      {/* ─── PHASE D — Smart Quota Allocator ───────────────────────────── */}
+      {quota.items.length > 0 && (
+        <div className="bg-gradient-to-br from-[#012b25] to-[#023831] rounded-3xl p-6 shadow-md text-white">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="flex-1">
+              <h3 className="font-display text-lg flex items-center gap-2"><Sparkles className="w-4 h-4 text-[#d9eb54]" /> Smart Quota — จัดสรรตามเงินคอมจริง</h3>
+              <p className="text-xs text-emerald-300 mt-0.5">ตัวเงินดี = ลงเยอะ · ตัวคอมต่ำ = ลงน้อย (A-Light auto-detect)</p>
+            </div>
+            <button onClick={() => setQuotaExpanded(s => !s)} className="text-xs text-emerald-300 hover:text-white"><ChevronDown className={`w-4 h-4 transition-transform ${quotaExpanded ? 'rotate-180' : ''}`} /></button>
+          </div>
+
+          {/* Budget summary */}
+          <div className="grid grid-cols-4 gap-2 mb-4 text-center">
+            <div className="bg-white/5 rounded-xl py-2.5 px-2 border border-white/10"><div className="text-[9px] text-emerald-300 uppercase tracking-wider">เป้ารวม/เดือน</div><div className="font-display text-lg text-[#d9eb54]">{quota.monthlyBudget}</div></div>
+            <div className="bg-white/5 rounded-xl py-2.5 px-2 border border-white/10"><div className="text-[9px] text-emerald-300 uppercase tracking-wider">V Reserve (10%)</div><div className="font-display text-lg text-white/80">{quota.reserveV}</div></div>
+            <div className="bg-white/5 rounded-xl py-2.5 px-2 border border-white/10"><div className="text-[9px] text-emerald-300 uppercase tracking-wider">Explore (10%)</div><div className="font-display text-lg text-white/80">{quota.reserveExplore}</div></div>
+            <div className="bg-[#d9eb54]/15 rounded-xl py-2.5 px-2 border border-[#d9eb54]/30"><div className="text-[9px] text-[#d9eb54] uppercase tracking-wider">→ Locked</div><div className="font-display text-lg text-[#d9eb54]">{quota.lockedBudget}</div></div>
+          </div>
+
+          {quotaExpanded && (
+            <>
+              {/* Table */}
+              <div className="bg-white/5 rounded-2xl overflow-hidden border border-white/10">
+                <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-white/5 text-[10px] uppercase tracking-wider font-bold text-emerald-300">
+                  <div className="col-span-5">สินค้า</div>
+                  <div className="col-span-2 text-right">~คอม/ด</div>
+                  <div className="col-span-1 text-center">เดิม</div>
+                  <div className="col-span-1 text-center">เสนอ</div>
+                  <div className="col-span-1 text-center">Δ</div>
+                  <div className="col-span-2 text-right">Action</div>
+                </div>
+                <div className="divide-y divide-white/5 max-h-96 overflow-y-auto">
+                  {quota.items.map(item => {
+                    const ci = getAbcdInfo(item.p.category);
+                    const isUp = item.delta > 0;
+                    const isDown = item.delta < 0;
+                    return (
+                      <div key={item.p.id} className="grid grid-cols-12 gap-2 px-3 py-2 items-center text-xs hover:bg-white/5 transition-colors">
+                        <div className="col-span-5 flex items-center gap-2 min-w-0">
+                          <div className={`w-5 h-5 rounded-md ${ci.bg} text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0`}>{ci.short}</div>
+                          <span className="truncate text-white" title={item.p.name}>{item.p.name}</span>
+                          {item.isALight && <span className="text-[9px] bg-amber-400/20 text-amber-300 font-bold px-1.5 py-0.5 rounded-md border border-amber-400/20 flex-shrink-0" title="ขายดีแต่คอมต่ำ — ลงน้อยพอ">A-Light</span>}
+                        </div>
+                        <div className="col-span-2 text-right font-mono text-violet-300 font-bold">฿{fmtNum(item.estComm)}</div>
+                        <div className="col-span-1 text-center font-mono text-white/60">{item.currentTarget}</div>
+                        <div className="col-span-1 text-center font-mono font-bold text-[#d9eb54]">{item.suggestedTarget}</div>
+                        <div className={`col-span-1 text-center font-mono font-bold ${isUp ? 'text-emerald-300' : isDown ? 'text-rose-300' : 'text-white/30'}`}>{isUp ? '+' : ''}{item.delta || '±0'}</div>
+                        <div className="col-span-2 text-right">
+                          {item.delta !== 0 && <button onClick={() => applyQuotaOne(item)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-lg font-bold transition-colors">ใช้</button>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-white/10 text-xs font-bold border-t border-white/10">
+                  <div className="col-span-5 text-emerald-300">รวม</div>
+                  <div className="col-span-2 text-right text-violet-300">฿{fmtNum(quota.items.reduce((s,i)=>s+i.estComm,0))}</div>
+                  <div className="col-span-1 text-center text-white/60">{quota.items.reduce((s,i)=>s+i.currentTarget,0)}</div>
+                  <div className="col-span-1 text-center text-[#d9eb54]">{quota.totalSuggested}</div>
+                  <div className="col-span-3"></div>
+                </div>
+              </div>
+
+              {/* Action bar */}
+              <div className="flex items-center justify-between mt-4 gap-3">
+                <p className="text-[10px] text-emerald-300/70">
+                  {quota.anyChange ? `📊 ${quota.items.filter(i=>i.delta!==0).length} สินค้าจะถูกปรับ — กดใช้ทั้งหมดหรือเลือกทีละตัว` : '✓ ทุกตัวอยู่ในระดับที่เหมาะแล้ว'}
+                </p>
+                <button onClick={applyQuotaAll} disabled={!quota.anyChange || quotaApplying} className={`text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 ${quota.anyChange && !quotaApplying ? 'bg-[#d9eb54] text-[#012b25] hover:bg-[#eaf96c]' : 'bg-white/10 text-white/40 cursor-not-allowed'}`}>
+                  {quotaApplying ? '⏳ กำลังใช้...' : <><Check className="w-3.5 h-3.5" /> ใช้กับทุกตัว</>}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {lockedProducts.length === 0 ? (
         <div className="bg-white border border-[#e9eceb] rounded-3xl p-8 text-center text-slate-400 font-medium shadow-sm">ไม่มีข้อมูลสินค้าที่ตรึงเป้าในเดือนนี้</div>
       ) : (
-        <div className="space-y-6">
-          {Object.entries(categorizedLocked).map(([tier, list]) => {
+        <div className="space-y-4">
+          {['behind', 'onTrack', 'done'].map(status => {
+            const list = lockedByStatus[status];
             if (list.length === 0) return null;
-            const meta = { HOT: { label: '🔥 HOT STACK (เป้า 3-4 คลิป/สัปดาห์)', color: 'text-rose-600', bg: 'bg-rose-50' }, STEADY: { label: '⚡ STEADY STACK (เป้า 1-2 คลิป/สัปดาห์)', color: 'text-[#2563eb]', bg: 'bg-blue-50' }, PASSIVE: { label: '💤 PASSIVE STACK (เป้า 2-3 คลิป/เดือน)', color: 'text-slate-600', bg: 'bg-slate-50' } }[tier];
+            const meta = {
+              behind: { label: '⚠️ ตามหลัง / ยังไม่เริ่ม', color: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-100', barColor: 'bg-rose-400' },
+              onTrack: { label: '🎯 ทันเป้า', color: 'text-sky-700', bg: 'bg-sky-50', border: 'border-sky-100', barColor: 'bg-[#bcd924]' },
+              done: { label: '✓ ครบแล้ว', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-100', barColor: 'bg-emerald-500' }
+            }[status];
             return (
-              <div key={tier} className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm space-y-4">
-                <div className={`p-3 rounded-2xl flex items-center justify-between font-bold text-xs ${meta.bg} ${meta.color}`}><span>{meta.label}</span><span className="font-mono">{list.length} แบรนด์</span></div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div key={status} className={`bg-white border ${meta.border} rounded-3xl p-5 shadow-sm space-y-4`}>
+                <div className={`px-3 py-2 rounded-xl flex items-center justify-between font-bold text-xs ${meta.bg} ${meta.color}`}>
+                  <span>{meta.label}</span>
+                  <span className="font-mono">{list.length} สินค้า</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {list.map(s => {
-                    const made = clips.filter(c => c.productId === s.product.id && c.postedAt?.slice(0, 7) === monthKey).length;
-                    const target = s.product.locked?.targetClips || s.targetMonth || 1;
-                    const pct = Math.min(100, Math.round((made / target) * 100));
                     const catInfo = getAbcdInfo(s.product.category);
                     return (
-                      <div key={s.product.id} className="border border-slate-100 p-4 rounded-2xl flex flex-col justify-between space-y-3 bg-slate-50/50">
-                        <div className="flex items-center justify-between"><div className="flex items-center gap-2"><div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white`}>{catInfo.short}</div><span className="font-display font-bold text-sm text-[#012b25] truncate max-w-[160px]">{s.product.name}</span></div><button onClick={() => onUnlock(s.product.id)} className="text-slate-400 hover:text-rose-600 transition-colors">🔓 ปลดล็อก</button></div>
+                      <div key={s.product.id} className="border border-slate-100 p-4 rounded-2xl flex flex-col justify-between space-y-3 bg-slate-50/40 hover:bg-slate-50 transition-colors">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-6 h-6 rounded-md font-bold text-xs flex items-center justify-center ${catInfo.bg} text-white flex-shrink-0`}>{catInfo.short}</div>
+                            <span className="font-display font-bold text-sm text-[#012b25] truncate">{s.product.name}</span>
+                          </div>
+                          <button onClick={() => onUnlock(s.product.id)} className="text-[10px] text-slate-400 hover:text-rose-600 transition-colors flex-shrink-0">🔓 ปลด</button>
+                        </div>
                         <div>
-                          <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-500 mb-1"><span>ยอดทำจริงเทียบกับเป้าหมายความถี่:</span><span>{made} / {Math.round(target)} คลิป ({pct}%)</span></div>
-                          <div className="w-full h-2 bg-slate-200/60 rounded-full overflow-hidden"><div className="h-full bg-[#bcd924] rounded-full transition-all duration-300" style={{ width: `${pct}%` }}></div></div>
+                          <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-500 mb-1">
+                            <span>{s.made} / {s.target} คลิป</span>
+                            <span className="text-slate-600">{s.pct}%{s.behind > 0 && <span className="text-amber-700 ml-1.5">(ยังขาด {s.behind})</span>}</span>
+                          </div>
+                          <div className="w-full h-2 bg-slate-200/60 rounded-full overflow-hidden">
+                            <div className={`h-full ${meta.barColor} rounded-full transition-all duration-300`} style={{ width: `${Math.min(100, s.pct)}%` }}></div>
+                          </div>
                         </div>
                         <button onClick={() => onSelectProduct(s.product.id)} className="w-full bg-white text-slate-600 text-xs font-bold py-2.5 rounded-xl text-center border border-slate-200 hover:bg-slate-50 transition-all">เปิดดูสเปก & ปั่นบทสคริปต์ 👉</button>
                       </div>
@@ -2819,6 +3034,16 @@ function AddClipModal({ products, defaultProductId, onClose, onSave, showToast }
   };
   return (<Modal title="🎬 เพิ่มประวัติการลงคลิป" onClose={onClose} size="lg" footer={<button onClick={handleSave} className="w-full bg-[#012b25] text-[#d9eb54] hover:bg-[#033c32] font-bold py-4 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2"><Plus className="w-4 h-4"/> บันทึกข้อมูลคลิปลงระบบ</button>}>
     <div className="flex bg-[#f3f6f5] rounded-2xl p-1 mb-5"><button onClick={() => setIsV(false)} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${!isV ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-500'}`}>📦 คลิปขายสินค้า</button><button onClick={() => setIsV(true)} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${isV ? 'bg-[#012b25] text-white shadow-sm' : 'text-slate-500'}`}>📚 V — Content (สาระ)</button></div>
+    {!isV && selectedProduct && (() => { const ci = getAbcdInfo(selectedProduct.category); return (
+      <div className={`flex items-center gap-3 mb-4 p-3 rounded-2xl border border-emerald-200 ${ci.lightBg || 'bg-emerald-50/50'}`}>
+        <div className={`w-9 h-9 rounded-xl ${ci.bg} text-white flex items-center justify-center font-bold text-sm flex-shrink-0 shadow-sm`}>{ci.short}</div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] text-emerald-700 uppercase tracking-wider font-bold">กำลังลงคลิปสำหรับ</div>
+          <div className="font-display text-sm text-[#012b25] truncate">{selectedProduct.name}</div>
+        </div>
+        <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+      </div>
+    ); })()}
     {!isV && (<FormField label="เลือกสินค้าจากพอร์ต *"><select value={productId} onChange={e => setProductId(e.target.value)} className={`${inputStyles} bg-white shadow-sm cursor-pointer border-slate-200`}><option value="">-- เลือกรายการสินค้า --</option>{products.map(p => <option key={p.id} value={p.id}>{ABCD_INFO[p.category]?.short || '?'} — {p.name}</option>)}</select></FormField>)}
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><FormField label="Pillar (เสาหลัก)"><select value={pillarId} onChange={e => setPillarId(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200`}><option value="">- เลือก -</option>{DEFAULT_PILLARS.map(p => <option key={p.id} value={p.id}>{p.emoji} {p.id} — {p.name}</option>)}</select></FormField><FormField label="วันที่เริ่มโพสต์"><input type="date" value={postedAt} onChange={e => setPostedAt(e.target.value)} className={`${inputStyles} bg-white shadow-sm border-slate-200 font-mono`} /></FormField></div>
     {selectedProduct && !isV && (<div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-100 pt-4 mt-1"><FormField label="เลือก Pain Point ที่ใช้"><select value={painId} onChange={e => setPainId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">- ไม่ระบุ -</option>{selectedProduct.pains?.map(p => <option key={p.id} value={p.id}>{truncate(p.text, 50)}</option>)}</select></FormField><FormField label="เลือก Angle ที่เล่า"><select value={angleId} onChange={e => setAngleId(e.target.value)} className={`${inputStyles} bg-white border-slate-200`}><option value="">- ไม่ระบุ -</option>{selectedProduct.angles?.map(a => <option key={a.id} value={a.id}>{truncate(a.text, 50)}</option>)}</select></FormField></div>)}
