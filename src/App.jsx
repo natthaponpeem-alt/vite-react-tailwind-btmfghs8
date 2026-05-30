@@ -1043,6 +1043,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   // ─── TIER 1: Today's Mission ────────────────────────────────────────────
   const mission = useMemo(() => getTodayMission(clips, appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET), [clips, appSettings]);
   const todayMix = useMemo(() => getTodayMix(appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET, clips, products), [appSettings, clips, products]);
+  const [activeTab, setActiveTab] = useState('today');  // Phase C.3
   // ─── TIER 2: What to Post Today ─────────────────────────────────────────
   const postSuggestions = useMemo(() => getPostTodaySuggestions(products, clips), [products, clips]);
   // ─── TIER 2A: This Week's Focus (ABCD boxes — Phase C.1) ───────────────
@@ -1145,6 +1146,14 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           </div>
         </div>
       )}
+
+      {/* ─── PHASE C.3: TAB SWITCHER (Today / Stats) ────────────────────── */}
+      <div className="flex bg-[#f3f6f5] rounded-2xl p-1 sticky top-0 z-10">
+        <button onClick={() => setActiveTab('today')} className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${activeTab === 'today' ? 'bg-white text-[#012b25] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>🎯 วันนี้</button>
+        <button onClick={() => setActiveTab('stats')} className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${activeTab === 'stats' ? 'bg-[#012b25] text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>📊 สถิติ</button>
+      </div>
+
+      {activeTab === 'today' && (<>
 
       {/* ─── TIER 1B: DAILY MIX ADVISOR (Phase C.2) ─────────────────────── */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-5 shadow-sm">
@@ -1315,48 +1324,52 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
-      {/* ─── TIER 4: OPPORTUNITIES ────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-[#7c3aed]" /> Repost Queue</h3>
-            {repostCandidates.length > 0 && <span className="text-[10px] bg-[#7c3aed]/10 text-[#7c3aed] font-bold px-2 py-0.5 rounded-full">{repostCandidates.length}</span>}
-          </div>
-          <div className="space-y-3">
-            {repostCandidates.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ไม่มี Winner เข้าเกณฑ์ repost</p>) : (
-              repostCandidates.map(r => (
-                <div key={r.clip.id} className="p-3.5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs border border-slate-100/50">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-bold text-slate-800 truncate">{r.clip.hook || 'ไม่มี Hook'}</div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">฿{fmtNum(r.clip.gmv)} · {r.daysOld}d ago · D{r.repostBucket}</div>
-                  </div>
-                  <div className="flex gap-1.5 flex-shrink-0">
-                    <button onClick={() => onMakeSimilar(r.clip)} className="bg-[#d9eb54] text-[#012b25] font-bold px-2.5 py-1.5 rounded-lg text-[11px]">ปั่นสคริปต์</button>
-                    <button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="bg-[#e2f7e4] text-[#1d7c2a] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 text-[11px]">✓ ลงแล้ว</button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+      {/* ─── TIER 4: REPOST QUEUE (full-width in Today tab) ───────────── */}
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-[#7c3aed]" /> Repost Queue</h3>
+          {repostCandidates.length > 0 && <span className="text-[10px] bg-[#7c3aed]/10 text-[#7c3aed] font-bold px-2 py-0.5 rounded-full">{repostCandidates.length}</span>}
         </div>
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Winners Archive</h3>
-            {winners.length > 0 && <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full">{winners.length}</span>}
-          </div>
-          <div className="space-y-2.5">
-            {winners.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ยังไม่มีคลิปยอด ≥ ฿{fmtNum(WINNER_GMV)}</p>) : (
-              winners.map(w => (
-                <div key={w.clip.id} className="p-3 bg-amber-50/50 border border-amber-100 rounded-2xl flex items-center justify-between gap-3 text-xs">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-bold text-slate-800 truncate">{w.clip.hook || 'ไม่มี Hook'}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{w.product?.name || 'V-Content'} · {w.daysOld}d</div>
-                  </div>
-                  <span className="font-mono font-bold text-amber-700 text-sm flex-shrink-0">฿{fmtNum(w.clip.gmv)}</span>
+        <div className="space-y-3">
+          {repostCandidates.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ไม่มี Winner เข้าเกณฑ์ repost</p>) : (
+            repostCandidates.map(r => (
+              <div key={r.clip.id} className="p-3.5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs border border-slate-100/50">
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-slate-800 truncate">{r.clip.hook || 'ไม่มี Hook'}</div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">฿{fmtNum(r.clip.gmv)} · {r.daysOld}d ago · D{r.repostBucket}</div>
                 </div>
-              ))
-            )}
-          </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <button onClick={() => onMakeSimilar(r.clip)} className="bg-[#d9eb54] text-[#012b25] font-bold px-2.5 py-1.5 rounded-lg text-[11px]">ปั่นสคริปต์</button>
+                  <button onClick={() => onMarkRepostDone(r.clip.id, r.repostBucket)} className="bg-[#e2f7e4] text-[#1d7c2a] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 text-[11px]">✓ ลงแล้ว</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      </>)}
+
+      {activeTab === 'stats' && (<>
+
+      {/* ─── TIER 4B: WINNERS ARCHIVE (moved to Stats tab) ───────────── */}
+      <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Winners Archive</h3>
+          {winners.length > 0 && <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full">{winners.length}</span>}
+        </div>
+        <div className="space-y-2.5">
+          {winners.length === 0 ? (<p className="text-xs text-slate-400 italic text-center py-6">ยังไม่มีคลิปยอด ≥ ฿{fmtNum(WINNER_GMV)}</p>) : (
+            winners.map(w => (
+              <div key={w.clip.id} className="p-3 bg-amber-50/50 border border-amber-100 rounded-2xl flex items-center justify-between gap-3 text-xs">
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-slate-800 truncate">{w.clip.hook || 'ไม่มี Hook'}</div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">{w.product?.name || 'V-Content'} · {w.daysOld}d</div>
+                </div>
+                <span className="font-mono font-bold text-amber-700 text-sm flex-shrink-0">฿{fmtNum(w.clip.gmv)}</span>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -1574,6 +1587,8 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           </div>
         </div>
       </div>
+
+      </>)}
 
     </div>
   );
