@@ -339,12 +339,16 @@ function getTodayMix(monthlyTarget, clips, products) {
   return { target, done, dailyTotal, totalDone, totalTarget };
 }
 
-function getQuotaSuggestions(lockedProducts, clips, monthlyBudget = 150) {
-  const reserveV = Math.floor(monthlyBudget * 0.10);
-  const reserveExplore = Math.floor(monthlyBudget * 0.10);
+function getQuotaSuggestions(lockedProducts, clips, monthlyBudget = 150, settings = {}) {
+  // SQ-Settings: ปรับ constants จาก appSettings
+  const reserveVPct = Number(settings.quotaReserveV) || 0.10;
+  const reserveExplorePct = Number(settings.quotaReserveExplore) || 0.10;
+  const MIN_CLIPS = Math.max(1, Number(settings.quotaMinClips) || 3);
+  const MAX_PCT = Math.min(0.80, Math.max(0.10, Number(settings.quotaMaxPct) || 0.30));
+  const reserveV = Math.floor(monthlyBudget * reserveVPct);
+  const reserveExplore = Math.floor(monthlyBudget * reserveExplorePct);
   const lockedBudget = monthlyBudget - reserveV - reserveExplore;
-  const MIN_CLIPS = 3;
-  const MAX_CLIPS = Math.max(MIN_CLIPS, Math.floor(lockedBudget * 0.30));
+  const MAX_CLIPS = Math.max(MIN_CLIPS, Math.floor(lockedBudget * MAX_PCT));
 
   if (!Array.isArray(lockedProducts) || lockedProducts.length === 0) {
     return { items: [], reserveV, reserveExplore, lockedBudget, monthlyBudget, totalWeight: 0, totalSuggested: 0, anyChange: false };
@@ -825,7 +829,7 @@ export default function App() {
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} onUpdate={updateProductInCloud} onTriage={() => setPage('triage')} />)}
           {page === 'triage' && (<TriageModePage products={products} clips={clips} onUpdate={updateProductInCloud} onBack={() => setPage('products')} showToast={showToast} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
-          {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} appSettings={appSettings} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} onUpdate={updateProductInCloud} showToast={showToast} />)}
+          {page === 'lock' && (<LockListPage lockedProducts={lockedProducts} products={products} clips={clips} appSettings={appSettings} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onUnlock={async (id) => await updateProductInCloud(id, { locked: null })} onLockNew={() => setPage('products')} onUpdate={updateProductInCloud} onUpdateSettings={updateSettingsInCloud} showToast={showToast} />)}
           {page === 'analytics' && (<DashboardView products={products} clips={clips} appSettings={appSettings} onUpdateSettings={updateSettingsInCloud} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onEditClip={(id) => setEditClipId(id)} onMarkRepostDone={markRepostDone} onPromoteToA={async (id) => await updateProductInCloud(id, { category: 'A' })} />)}
           {page === 'log' && (<ClipLogPage products={products} clips={clips} onEditClip={(id) => setEditClipId(id)} />)}
         </div>
@@ -1324,7 +1328,8 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
-      {/* ─── TIER 4: REPOST QUEUE (full-width in Today tab) ───────────── */}
+      {/* ─── TIER 4: REPOST QUEUE (only when candidates exist) ───────── */}
+      {repostCandidates.length > 0 && (
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Repeat className="w-4 h-4 text-[#7c3aed]" /> Repost Queue</h3>
@@ -1347,6 +1352,7 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
           )}
         </div>
       </div>
+      )}
 
       </>)}
 
@@ -2281,14 +2287,15 @@ function SplitterSection({ product }) {
   );
 }
 
-function LockListPage({ lockedProducts, products, clips, appSettings, onSelectProduct, onUnlock, onLockNew, onUpdate, showToast }) {
+function LockListPage({ lockedProducts, products, clips, appSettings, onSelectProduct, onUnlock, onLockNew, onUpdate, onUpdateSettings, showToast }) {
   const monthKey = currentMonth();
   const monthlyBudget = appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET;
 
   // ─── Phase D: Smart Quota Allocator ─────────────────────────────────
-  const quota = useMemo(() => getQuotaSuggestions(lockedProducts, clips, monthlyBudget), [lockedProducts, clips, monthlyBudget]);
+  const quota = useMemo(() => getQuotaSuggestions(lockedProducts, clips, monthlyBudget, appSettings), [lockedProducts, clips, monthlyBudget, appSettings]);
   const [quotaApplying, setQuotaApplying] = useState(false);
   const [quotaExpanded, setQuotaExpanded] = useState(true);
+  const [showQuotaSettings, setShowQuotaSettings] = useState(false);  // SQ-Settings
 
   const applyQuotaAll = async () => {
     if (!onUpdate || quota.items.length === 0) return;
@@ -2347,6 +2354,7 @@ function LockListPage({ lockedProducts, products, clips, appSettings, onSelectPr
               <p className="text-xs text-emerald-300 mt-0.5">ตัวเงินดี = ลงเยอะ · ตัวคอมต่ำ = ลงน้อย (A-Light auto-detect)</p>
             </div>
             <button onClick={() => setQuotaExpanded(s => !s)} className="text-xs text-emerald-300 hover:text-white"><ChevronDown className={`w-4 h-4 transition-transform ${quotaExpanded ? 'rotate-180' : ''}`} /></button>
+            <button onClick={() => setShowQuotaSettings(true)} className="text-xs text-emerald-300 hover:text-white" title="ปรับสัดส่วน"><Settings className="w-4 h-4" /></button>
           </div>
 
           {/* Budget summary */}
@@ -2464,6 +2472,90 @@ function LockListPage({ lockedProducts, products, clips, appSettings, onSelectPr
           })}
         </div>
       )}
+
+      {/* SQ-Settings Modal */}
+      {showQuotaSettings && <QuotaSettingsModal appSettings={appSettings} onUpdateSettings={onUpdateSettings} onClose={() => setShowQuotaSettings(false)} showToast={showToast} />}
+    </div>
+  );
+}
+
+// ─── SQ-Settings Modal ────────────────────────────────────────────────
+function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast }) {
+  const [vPct, setVPct] = useState(Math.round(((appSettings?.quotaReserveV) || 0.10) * 100));
+  const [explorePct, setExplorePct] = useState(Math.round(((appSettings?.quotaReserveExplore) || 0.10) * 100));
+  const [minClips, setMinClips] = useState(Number(appSettings?.quotaMinClips) || 3);
+  const [maxPct, setMaxPct] = useState(Math.round(((appSettings?.quotaMaxPct) || 0.30) * 100));
+  const [defaultLock, setDefaultLock] = useState(Number(appSettings?.defaultLockTarget) || 10);
+  const [saving, setSaving] = useState(false);
+  const budget = appSettings?.monthlyTarget || 150;
+  const vClips = Math.floor(budget * vPct / 100);
+  const exploreClips = Math.floor(budget * explorePct / 100);
+  const lockedClips = budget - vClips - exploreClips;
+  const maxPerProduct = Math.floor(lockedClips * maxPct / 100);
+
+  const save = async () => {
+    if (!onUpdateSettings) return;
+    setSaving(true);
+    try {
+      await onUpdateSettings({
+        quotaReserveV: vPct / 100,
+        quotaReserveExplore: explorePct / 100,
+        quotaMinClips: minClips,
+        quotaMaxPct: maxPct / 100,
+        defaultLockTarget: defaultLock,
+      });
+      if (showToast) showToast('✓ บันทึก Smart Quota Settings');
+      onClose();
+    } catch (e) {
+      if (showToast) showToast('เกิดข้อผิดพลาด', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const reset = () => {
+    setVPct(10); setExplorePct(10); setMinClips(3); setMaxPct(30); setDefaultLock(10);
+  };
+
+  const SliderRow = ({ label, value, setValue, min, max, suffix, hint }) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-bold text-[#012b25]">{label}</label>
+        <span className="font-mono text-sm font-bold text-emerald-700">{value}{suffix}</span>
+      </div>
+      <input type="range" min={min} max={max} value={value} onChange={e => setValue(Number(e.target.value))} className="w-full accent-[#d9eb54]" />
+      {hint && <p className="text-[10px] text-slate-400">{hint}</p>}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#012b25]/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2"><Settings className="w-5 h-5 text-emerald-600" /> Smart Quota Settings</h3>
+            <p className="text-xs text-slate-400 mt-0.5">ปรับสัดส่วนการจัดสรรคลิป</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3">
+          <div className="text-[10px] text-emerald-700 uppercase font-bold tracking-wider mb-1">📊 พรีวิวจาก budget {budget} คลิป/เดือน</div>
+          <div className="text-xs text-slate-700 leading-relaxed">
+            V Reserve: <strong>{vClips}</strong> · Explore: <strong>{exploreClips}</strong> · Locked: <strong>{lockedClips}</strong><br/>
+            Max ต่อสินค้า: <strong>{maxPerProduct}</strong> คลิป · Min: <strong>{minClips}</strong> คลิป
+          </div>
+        </div>
+
+        <SliderRow label="🎬 V Reserve (Content คลิป)" value={vPct} setValue={setVPct} min={0} max={25} suffix="%" hint="คลิปสาระล้วน ไม่ขายสินค้า — แนะนำ 10%" />
+        <SliderRow label="🔍 Explore Reserve (เทสตัวใหม่)" value={explorePct} setValue={setExplorePct} min={0} max={30} suffix="%" hint="งบเทสสินค้าที่ยังไม่ Lock — แนะนำ 10-15%" />
+        <SliderRow label="⬇️ Min Clips ต่อ Locked Product" value={minClips} setValue={setMinClips} min={1} max={15} suffix=" คลิป" hint="ขั้นต่ำเพื่อเทส — ตัวอ่อนใหม่ตั้ง 5-8 ก็ได้" />
+        <SliderRow label="⬆️ Max Share ต่อ Product" value={maxPct} setValue={setMaxPct} min={15} max={60} suffix="%" hint="ป้องกัน over-concentration — แนะนำ 25-30%" />
+        <SliderRow label="🔒 Default Target เมื่อ Lock ใหม่" value={defaultLock} setValue={setDefaultLock} min={3} max={30} suffix=" คลิป" hint="ค่าเริ่มต้นเมื่อกด Lock ครั้งแรก" />
+
+        <div className="flex gap-2 pt-2">
+          <button onClick={reset} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm py-3 px-4 rounded-2xl transition-colors">⟲ Reset</button>
+          <button onClick={save} disabled={saving} className="flex-1 bg-[#012b25] hover:bg-[#023831] text-[#d9eb54] font-bold text-sm py-3 rounded-2xl shadow-md transition-colors disabled:opacity-50">{saving ? '⏳ กำลังบันทึก...' : '💾 บันทึก'}</button>
+        </div>
+      </div>
     </div>
   );
 }
