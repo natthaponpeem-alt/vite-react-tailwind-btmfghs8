@@ -307,6 +307,38 @@ function getUnfairAdvantage(products, clips) {
   return { locked, discovery };
 }
 
+// ─── EXPLORE PIPELINE — สินค้าที่ไม่ Lock + น่าทดสอบ ──────────────────
+// รวมทั้ง classified (มี A/B/C/D) + ghost ที่มียอดขายแฝง
+function getExplorePipeline(products, clips, exploreBudget = 15) {
+  if (!Array.isArray(products)) return { candidates: [], totalWeight: 0, exploreBudget };
+  const list = products.filter(p => {
+    if (p.locked) return false;
+    if (p.decision === 'DROP') return false;
+    const rg = getRecentGMV(p, clips);
+    return rg.best > 0 || !!p.category;  // มียอด หรือ ผ่าน triage แล้ว
+  });
+  const scored = list.map(p => {
+    const rg = getRecentGMV(p, clips);
+    const commission = Number(p.scorecard?.commission) || 0;
+    const isGhost = !p.category;
+    // ghost ใช้ commission default 10% เพราะยังไม่มีข้อมูล
+    const effComm = commission > 0 ? commission : 10;
+    const weight = rg.best * effComm / 100;
+    return { p, weight, recentGMV: rg.best, commission, isGhost, fromLastMonth: rg.fromLastMonth };
+  });
+  const totalWeight = scored.reduce((s, i) => s + i.weight, 0);
+  // เสนอคลิป = weight ratio × exploreBudget, min 2
+  scored.forEach(i => {
+    i.suggested = totalWeight > 0 ? Math.max(2, Math.round((i.weight / totalWeight) * exploreBudget)) : 2;
+  });
+  // Sort: ghost with sales first (urgent), then by weight
+  scored.sort((a, b) => {
+    if (a.isGhost !== b.isGhost) return a.isGhost ? -1 : 1;
+    return b.weight - a.weight;
+  });
+  return { candidates: scored.slice(0, 6), totalWeight, exploreBudget };
+}
+
 // ─── PHASE D — SMART QUOTA ALLOCATOR ───────────────────────────────────
 // แบ่งคลิปตามเงินคอมที่ได้จริง (GMV × คอม%) + safety constraints
 // ─── PHASE C.2 — DAILY MIX ADVISOR ─────────────────────────────────────
@@ -839,7 +871,7 @@ export default function App() {
         </header>
 
         <div className="p-6 md:p-8 space-y-8">
-          {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPickToPost={(productId) => { if (productId) { setSelectedProductId(productId); setClipForVOnly(false); } else { setClipForVOnly(false); } setShowAddClip(true); }} onAddVClip={() => { setClipForVOnly(true); setShowAddClip(true); }} />)}
+          {page === 'home' && (<HomePage products={products} clips={clips} lockedProducts={lockedProducts} productsNeedingRescore={productsNeedingRescore} last7DaysClips={last7DaysClips} appSettings={appSettings} onGoTo={setPage} onSelectProduct={(id) => { setSelectedProductId(id); setPage('detail'); }} onEditClip={(id) => setEditClipId(id)} onMakeSimilar={(clip) => setMakeSimilarClip(clip)} onMarkRepostDone={markRepostDone} onPickToPost={(productId) => { if (productId) { setSelectedProductId(productId); setClipForVOnly(false); } else { setClipForVOnly(false); } setShowAddClip(true); }} onAddVClip={() => { setClipForVOnly(true); setShowAddClip(true); }} onUpdate={updateProductInCloud} showToast={showToast} />)}
           {page === 'products' && (<ProductHubPage products={products} clips={clips} onAdd={() => setShowAddProduct(true)} onSelect={(id) => { setSelectedProductId(id); setPage('detail'); }} onOpenRadar={() => setShowRadarModal(true)} onUpdate={updateProductInCloud} onTriage={() => setPage('triage')} />)}
           {page === 'triage' && (<TriageModePage products={products} clips={clips} onUpdate={updateProductInCloud} onBack={() => setPage('products')} showToast={showToast} />)}
           {page === 'detail' && selectedProduct && (<ProductDetailPage product={selectedProduct} clips={clips.filter(c => c.productId === selectedProduct.id)} allClips={clips} onBack={() => setPage('products')} onTogglePillar={async (pid) => { const next = selectedProduct.pillars.includes(pid) ? selectedProduct.pillars.filter(x => x !== pid) : [...selectedProduct.pillars, pid]; await updateProductInCloud(selectedProduct.id, { pillars: next }); }} onSetCategory={async (cat) => await updateProductInCloud(selectedProduct.id, { category: cat })} onAddPain={() => setShowAddPain(true)} onRemovePain={async (painId) => await updateProductInCloud(selectedProduct.id, { pains: (selectedProduct.pains || []).filter(x => x.id !== painId) })} onAddAngle={() => setShowAddAngle(true)} onRemoveAngle={async (angleId) => await updateProductInCloud(selectedProduct.id, { angles: (selectedProduct.angles || []).filter(x => x.id !== angleId) })} onEditScore={(() => setEditScoreProductId(selectedProduct.id))} onEditInfo={(() => setEditProductInfoId(selectedProduct.id))} onLock={(() => setShowLockProduct(true))} onUnlock={async () => await updateProductInCloud(selectedProduct.id, { locked: null })} onDelete={(() => setConfirmDeleteProdId(selectedProduct.id))} onAddClip={(() => { setClipForVOnly(false); setShowAddClip(true); })} onEditClip={(id) => setEditClipId(id)} />)}
@@ -1007,7 +1039,7 @@ function VBar({ label, value, target, sub, suffix = "" }) {
   );
 }
 
-function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, appSettings, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone, onPickToPost, onAddVClip }) {
+function HomePage({ products, clips, lockedProducts, productsNeedingRescore, last7DaysClips, appSettings, onGoTo, onSelectProduct, onEditClip, onMakeSimilar, onMarkRepostDone, onPickToPost, onAddVClip, onUpdate, showToast }) {
   const today = todayStr();
   const currentMonthKey = currentMonth();
   
@@ -1062,6 +1094,13 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
   const mission = useMemo(() => getTodayMission(clips, appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET), [clips, appSettings]);
   const todayMix = useMemo(() => getTodayMix(appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET, clips, products), [appSettings, clips, products]);
   const [activeTab, setActiveTab] = useState('today');  // Phase C.3
+  // Explore Pipeline (Today tab)
+  const explorePipeline = useMemo(() => {
+    const budget = appSettings?.monthlyTarget || DEFAULT_MONTHLY_CLIP_TARGET;
+    const explorePct = Number(appSettings?.quotaReserveExplore) || 0.10;
+    const exploreBudget = Math.floor(budget * explorePct);
+    return getExplorePipeline(products, clips, exploreBudget);
+  }, [products, clips, appSettings]);
   // ─── TIER 2: What to Post Today ─────────────────────────────────────────
   const postSuggestions = useMemo(() => getPostTodaySuggestions(products, clips), [products, clips]);
   // ─── TIER 2A: This Week's Focus (ABCD boxes — Phase C.1) ───────────────
@@ -1259,6 +1298,48 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ─── TIER 2A2: EXPLORE PIPELINE (ตัวไม่ Lock + ghost น่าทดสอบ) ─── */}
+      {explorePipeline.candidates.length > 0 && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+            <div>
+              <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-600" /> Explore Pipeline</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">สินค้าน่าทดสอบ — ใช้ budget Explore {explorePipeline.exploreBudget} คลิป</p>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">{explorePipeline.candidates.length} candidates</span>
+          </div>
+          <div className="space-y-1.5">
+            {explorePipeline.candidates.map(item => {
+              const { p, recentGMV, commission, isGhost, suggested, fromLastMonth } = item;
+              const ci = isGhost ? { bg: 'bg-slate-300', short: '?' } : getAbcdInfo(p.category);
+              return (
+                <div key={p.id} className={`group flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all ${isGhost ? 'bg-sky-50/50 border-sky-100 hover:bg-sky-50' : 'bg-slate-50/40 border-slate-100 hover:bg-slate-50'}`}>
+                  <div className={`w-6 h-6 rounded-md ${ci.bg} text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0`}>{ci.short}</div>
+                  <button onClick={() => onSelectProduct(p.id)} className="flex-1 min-w-0 text-left">
+                    <div className="text-xs font-semibold text-[#012b25] truncate group-hover:text-emerald-800">{p.name}</div>
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                      ฿{fmtNum(recentGMV)}{commission > 0 && ` · คอม ${commission}%`}{fromLastMonth && <span className="text-amber-600 ml-1">📅 last month</span>}
+                    </div>
+                  </button>
+                  {isGhost ? (
+                    <span className="text-[10px] bg-sky-100 text-sky-700 font-bold px-2 py-0.5 rounded-md flex-shrink-0 whitespace-nowrap">🌱 ยังไม่ Triage</span>
+                  ) : (
+                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-md flex-shrink-0 whitespace-nowrap">เสนอ {suggested} คลิป</span>
+                  )}
+                  <button onClick={() => onPickToPost && onPickToPost(p.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1" title="ลงคลิป"><Plus className="w-3 h-3" /></button>
+                  {!isGhost && onUpdate && (
+                    <button onClick={async () => { await onUpdate(p.id, { locked: { targetClips: Number(appSettings?.defaultLockTarget) || 10, startedAt: new Date().toISOString(), anglesToTest: [] } }); if (showToast) showToast(`🔒 Lock: ${p.name?.slice(0,25)}`); }} className="bg-[#012b25] hover:bg-[#023831] text-[#d9eb54] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1" title="Lock product"><Lock className="w-3 h-3" /></button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {explorePipeline.candidates.some(c => c.isGhost) && (
+            <p className="text-[10px] text-sky-700 mt-3 italic">💡 ตัว 🌱 ยังไม่ Triage — กด Triage Mode ใน Product Hub เพื่อจัดหมวดก่อน</p>
+          )}
         </div>
       )}
 
