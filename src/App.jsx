@@ -389,22 +389,29 @@ function getQuotaSuggestions(lockedProducts, clips, monthlyBudget = 150, setting
   const reserveExplorePct = Number(settings.quotaReserveExplore) || 0.10;
   const MIN_CLIPS = Math.max(1, Number(settings.quotaMinClips) || 3);
   const MAX_PCT = Math.min(0.80, Math.max(0.10, Number(settings.quotaMaxPct) || 0.30));
+  // Blend Boost: 1.0 = standard, 1.5+ = bias ไป high-commission
+  const blendBoost = Math.max(1.0, Math.min(2.5, Number(settings.blendBoost) || 1.0));
+  const TARGET_COMM = 15;
   const reserveV = Math.floor(monthlyBudget * reserveVPct);
   const reserveExplore = Math.floor(monthlyBudget * reserveExplorePct);
   const lockedBudget = monthlyBudget - reserveV - reserveExplore;
   const MAX_CLIPS = Math.max(MIN_CLIPS, Math.floor(lockedBudget * MAX_PCT));
 
   if (!Array.isArray(lockedProducts) || lockedProducts.length === 0) {
-    return { items: [], reserveV, reserveExplore, lockedBudget, monthlyBudget, totalWeight: 0, totalSuggested: 0, anyChange: false };
+    return { items: [], reserveV, reserveExplore, lockedBudget, monthlyBudget, totalWeight: 0, totalSuggested: 0, anyChange: false, blendBoost };
   }
 
   const items = lockedProducts.map(p => {
     const recent = getRecentGMV(p, clips).best;
     const commission = Number(p.scorecard?.commission) || 0;
     const rawWeight = (recent * commission) / 100;
-    const weight = Math.max(rawWeight, 1);  // floor 1 to prevent zero-share
+    // Blend Boost: weight = baseWeight × (commission/15)^(boost-1)
+    // boost=1.0 → multiplier=1 (เดิม), boost=1.7 → high-comm bonus / low-comm penalty
+    const blendMult = blendBoost > 1.0 && commission > 0 ? Math.pow(commission / TARGET_COMM, blendBoost - 1) : 1;
+    const adjustedWeight = rawWeight * blendMult;
+    const weight = Math.max(adjustedWeight, 1);  // floor 1 to prevent zero-share
     const currentTarget = Number(p.locked?.targetClips) || 10;
-    return { p, recent, commission, weight, rawWeight, estComm: Math.round(rawWeight), currentTarget };
+    return { p, recent, commission, weight, rawWeight, blendMult, estComm: Math.round(rawWeight), currentTarget };
   });
 
   const totalWeight = items.reduce((s, i) => s + i.weight, 0);
@@ -1473,6 +1480,89 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
       </>)}
 
       {activeTab === 'stats' && (<>
+
+      {/* ─── BLEND HEALTH MONITOR (M1 — top of Stats tab) ─────────────── */}
+      {blendedComm && blendedComm.breakdown.length > 0 && (() => {
+        const target = blendedComm.target || 15;
+        const current = blendedComm.blended;
+        const gap = +(target - current).toFixed(1);
+        const isMet = current >= target;
+        const isClose = current >= target * 0.8;
+        // Identify draggers (low-comm + high GMV) and boosters (high-comm)
+        const draggers = [...blendedComm.breakdown].filter(b => b.commission > 0 && b.commission < target).sort((a, b) => b.gmv - a.gmv).slice(0, 4);
+        const boosters = [...blendedComm.breakdown].filter(b => b.commission >= target).sort((a, b) => b.contribution - a.contribution).slice(0, 3);
+        const maxDraggerGmv = draggers[0]?.gmv || 1;
+        return (
+          <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="font-display text-lg text-[#012b25] flex items-center gap-2">💎 Blend Health</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Blended commission % — รวมทั้งพอร์ตล่าสุด 30 วัน</p>
+              </div>
+              <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${isMet ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : isClose ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-rose-50 text-rose-700 border-rose-100'}`}>
+                {isMet ? '✓ ถึงเป้า' : isClose ? `ใกล้เป้า · ห่าง ${gap}pp` : `🔴 ต่ำกว่าเป้า ${gap}pp`}
+              </span>
+            </div>
+
+            {/* Gauge bar */}
+            <div className="space-y-1.5">
+              <div className="flex items-baseline gap-2">
+                <span className="font-display text-3xl text-[#012b25]">{current.toFixed(1)}<span className="text-base text-slate-400">%</span></span>
+                <span className="text-xs text-slate-400">/ เป้า {target}%</span>
+              </div>
+              <div className="relative h-3 bg-slate-100 rounded-full overflow-hidden">
+                <div className={`absolute top-0 left-0 h-full transition-all ${isMet ? 'bg-emerald-500' : isClose ? 'bg-amber-400' : 'bg-rose-400'}`} style={{ width: `${Math.min(100, (current / target) * 100)}%` }} />
+                <div className="absolute top-0 h-full w-0.5 bg-[#012b25]" style={{ left: '100%', transform: 'translateX(-1px)' }} title={`เป้า ${target}%`} />
+              </div>
+            </div>
+
+            {/* Draggers section */}
+            {draggers.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <div className="text-[10px] text-rose-700 uppercase font-bold tracking-wider">📉 ตัวฉุด blend (low-comm × volume สูง)</div>
+                {draggers.map(d => {
+                  const barWidth = (d.gmv / maxDraggerGmv) * 100;
+                  return (
+                    <div key={d.product.id} className="flex items-center gap-2 text-xs">
+                      <span className="text-[10px] font-mono w-8 text-rose-600 font-bold">{d.commission}%</span>
+                      <span className="flex-1 min-w-0 truncate text-[#012b25]">{d.product.name}</span>
+                      <span className="text-[10px] font-mono text-slate-500 w-16 text-right">฿{fmtNum(d.gmv)}</span>
+                      <div className="w-20 h-1.5 bg-rose-50 rounded-full overflow-hidden flex-shrink-0">
+                        <div className="h-full bg-rose-400" style={{ width: `${barWidth}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Boosters section */}
+            {boosters.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <div className="text-[10px] text-emerald-700 uppercase font-bold tracking-wider">📈 ตัวพยุง blend (คอม ≥ {target}%)</div>
+                {boosters.map(b => (
+                  <div key={b.product.id} className="flex items-center gap-2 text-xs">
+                    <span className="text-[10px] font-mono w-8 text-emerald-600 font-bold">{b.commission}%</span>
+                    <span className="flex-1 min-w-0 truncate text-[#012b25]">{b.product.name}</span>
+                    <span className="text-[10px] font-mono text-slate-500 w-16 text-right">฿{fmtNum(b.gmv)}</span>
+                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-md border border-emerald-100 w-20 text-center">+฿{fmtNum(Math.round(b.contribution/100))}/ด</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Suggestion */}
+            {!isMet && (
+              <div className="bg-emerald-50/60 border border-emerald-100 rounded-2xl p-3">
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  💡 <strong>คำแนะนำ:</strong> ลด clip บน "ตัวฉุด" + push "ตัวพยุง" ให้แรงขึ้น  
+                  · ลอง preset <strong>💎 Blend-First</strong> ใน Smart Quota Settings เพื่อ auto ปรับ allocation
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ─── TIER 4B: WINNERS ARCHIVE (moved to Stats tab) ───────────── */}
       <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
@@ -2656,6 +2746,7 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
   const [minClips, setMinClips] = useState(Number(appSettings?.quotaMinClips) || 3);
   const [maxPct, setMaxPct] = useState(Math.round(((appSettings?.quotaMaxPct) || 0.30) * 100));
   const [defaultLock, setDefaultLock] = useState(Number(appSettings?.defaultLockTarget) || 10);
+  const [blendBoost, setBlendBoost] = useState(Math.round((Number(appSettings?.blendBoost) || 1.0) * 10));  // 10 = 1.0x
   const [saving, setSaving] = useState(false);
   const budget = appSettings?.monthlyTarget || 150;
   const vClips = Math.floor(budget * vPct / 100);
@@ -2665,20 +2756,21 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
 
   // ─ Preset configurations ─
   const PRESETS = {
-    discovery: { emoji: '🌱', label: 'Discovery', hint: 'เปิดทาง explore เทสกว้าง', v: 10, explore: 20, min: 4, max: 25, def: 8 },
-    test:      { emoji: '🧪', label: 'Test Mode', hint: 'ทดสอบ B/C ใหม่ 5+ คลิป', v: 8,  explore: 10, min: 5, max: 25, def: 8 },
-    focus:     { emoji: '🎯', label: 'Focus',     hint: 'ทุ่มลงตัวเด่นแรง',     v: 10, explore: 5,  min: 3, max: 40, def: 10 },
-    stable:    { emoji: '⚖️', label: 'Stable',    hint: 'Default — สมดุล',     v: 10, explore: 10, min: 3, max: 30, def: 10 },
+    discovery:  { emoji: '🌱', label: 'Discovery',  hint: 'เปิดทาง explore เทสกว้าง',     v: 10, explore: 20, min: 4, max: 25, def: 8,  boost: 10 },
+    test:       { emoji: '🧪', label: 'Test Mode',  hint: 'ทดสอบ B/C ใหม่ 5+ คลิป',        v: 8,  explore: 10, min: 5, max: 25, def: 8,  boost: 10 },
+    focus:      { emoji: '🎯', label: 'Focus',      hint: 'ทุ่มลงตัวเด่นแรง',              v: 10, explore: 5,  min: 3, max: 40, def: 10, boost: 10 },
+    blendFirst: { emoji: '💎', label: 'Blend-First', hint: 'คอมสูง priority — ดัน blend ขึ้น', v: 10, explore: 8,  min: 5, max: 30, def: 10, boost: 17 },
+    stable:     { emoji: '⚖️', label: 'Stable',     hint: 'Default — สมดุล',              v: 10, explore: 10, min: 3, max: 30, def: 10, boost: 10 },
   };
 
   const applyPreset = (key) => {
     const p = PRESETS[key];
-    setVPct(p.v); setExplorePct(p.explore); setMinClips(p.min); setMaxPct(p.max); setDefaultLock(p.def);
+    setVPct(p.v); setExplorePct(p.explore); setMinClips(p.min); setMaxPct(p.max); setDefaultLock(p.def); setBlendBoost(p.boost);
   };
 
   // ตรวจว่า preset ไหน active ปัจจุบัน (ค่าตรงกัน 100%)
   const activePreset = Object.entries(PRESETS).find(([k, p]) =>
-    p.v === vPct && p.explore === explorePct && p.min === minClips && p.max === maxPct && p.def === defaultLock
+    p.v === vPct && p.explore === explorePct && p.min === minClips && p.max === maxPct && p.def === defaultLock && p.boost === blendBoost
   )?.[0];
 
   const save = async () => {
@@ -2691,6 +2783,7 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
         quotaMinClips: minClips,
         quotaMaxPct: maxPct / 100,
         defaultLockTarget: defaultLock,
+        blendBoost: blendBoost / 10,
       });
       if (showToast) showToast('✓ บันทึก Smart Quota Settings');
       onClose();
@@ -2700,8 +2793,11 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
   };
 
   const reset = () => {
-    setVPct(10); setExplorePct(10); setMinClips(3); setMaxPct(30); setDefaultLock(10);
+    setVPct(10); setExplorePct(10); setMinClips(3); setMaxPct(30); setDefaultLock(10); setBlendBoost(10);
   };
+
+  // Grid for 5 presets (was 4) — accommodate Blend-First
+  const presetGridClass = "grid grid-cols-2 sm:grid-cols-5 gap-2";
 
   const SliderRow = ({ label, value, setValue, min, max, suffix, hint }) => (
     <div className="space-y-1.5">
@@ -2736,7 +2832,7 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
         {/* Preset Buttons */}
         <div>
           <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-2">⚡ Quick Preset</div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             {Object.entries(PRESETS).map(([key, p]) => {
               const isActive = activePreset === key;
               return (
@@ -2755,6 +2851,26 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
         <SliderRow label="⬇️ Min Clips ต่อ Locked Product" value={minClips} setValue={setMinClips} min={1} max={15} suffix=" คลิป" hint="ขั้นต่ำเพื่อเทส — ตัวอ่อนใหม่ตั้ง 5-8 ก็ได้" />
         <SliderRow label="⬆️ Max Share ต่อ Product" value={maxPct} setValue={setMaxPct} min={15} max={60} suffix="%" hint="ป้องกัน over-concentration — แนะนำ 25-30%" />
         <SliderRow label="🔒 Default Target เมื่อ Lock ใหม่" value={defaultLock} setValue={setDefaultLock} min={3} max={30} suffix=" คลิป" hint="ค่าเริ่มต้นเมื่อกด Lock ครั้งแรก" />
+
+        {/* Blend Boost — high-comm priority */}
+        <div className="space-y-1.5 bg-emerald-50/40 -mx-2 px-4 py-3 rounded-2xl border border-emerald-100">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-[#012b25]">💎 Blend Boost — ดัน blend %</label>
+            <span className="font-mono text-sm font-bold text-emerald-700">{(blendBoost/10).toFixed(1)}x</span>
+          </div>
+          <input type="range" min={10} max={25} step={1} value={blendBoost} onChange={e => setBlendBoost(Number(e.target.value))} className="w-full accent-emerald-600" />
+          <div className="flex justify-between text-[9px] text-slate-400">
+            <span>1.0× (Standard)</span>
+            <span>1.7× (แนะนำ)</span>
+            <span>2.5× (Aggressive)</span>
+          </div>
+          <p className="text-[10px] text-emerald-700 mt-1">
+            {blendBoost <= 10 ? 'Standard — เรียง weight ปกติ (GMV × คอม%)' :
+             blendBoost <= 14 ? 'Mild bias — high-comm ได้ priority เล็กน้อย' :
+             blendBoost <= 18 ? 'Recommended — คอม ≥15% ได้ bonus / คอมต่ำ ลด แต่ยังพอลง' :
+             'Aggressive — ทุ่ม high-comm เกือบหมด · low-comm ใกล้ minimum'}
+          </p>
+        </div>
 
         <div className="flex gap-2 pt-2">
           <button onClick={reset} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm py-3 px-4 rounded-2xl transition-colors">⟲ Reset</button>
