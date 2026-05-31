@@ -2562,6 +2562,24 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
   const lockedClips = budget - vClips - exploreClips;
   const maxPerProduct = Math.floor(lockedClips * maxPct / 100);
 
+  // ─ Preset configurations ─
+  const PRESETS = {
+    discovery: { emoji: '🌱', label: 'Discovery', hint: 'เปิดทาง explore เทสกว้าง', v: 10, explore: 20, min: 4, max: 25, def: 8 },
+    test:      { emoji: '🧪', label: 'Test Mode', hint: 'ทดสอบ B/C ใหม่ 5+ คลิป', v: 8,  explore: 10, min: 5, max: 25, def: 8 },
+    focus:     { emoji: '🎯', label: 'Focus',     hint: 'ทุ่มลงตัวเด่นแรง',     v: 10, explore: 5,  min: 3, max: 40, def: 10 },
+    stable:    { emoji: '⚖️', label: 'Stable',    hint: 'Default — สมดุล',     v: 10, explore: 10, min: 3, max: 30, def: 10 },
+  };
+
+  const applyPreset = (key) => {
+    const p = PRESETS[key];
+    setVPct(p.v); setExplorePct(p.explore); setMinClips(p.min); setMaxPct(p.max); setDefaultLock(p.def);
+  };
+
+  // ตรวจว่า preset ไหน active ปัจจุบัน (ค่าตรงกัน 100%)
+  const activePreset = Object.entries(PRESETS).find(([k, p]) =>
+    p.v === vPct && p.explore === explorePct && p.min === minClips && p.max === maxPct && p.def === defaultLock
+  )?.[0];
+
   const save = async () => {
     if (!onUpdateSettings) return;
     setSaving(true);
@@ -2612,6 +2630,23 @@ function QuotaSettingsModal({ appSettings, onUpdateSettings, onClose, showToast 
             V Reserve: <strong>{vClips}</strong> · Explore: <strong>{exploreClips}</strong> · Locked: <strong>{lockedClips}</strong><br/>
             Max ต่อสินค้า: <strong>{maxPerProduct}</strong> คลิป · Min: <strong>{minClips}</strong> คลิป
           </div>
+        </div>
+
+        {/* Preset Buttons */}
+        <div>
+          <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-2">⚡ Quick Preset</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {Object.entries(PRESETS).map(([key, p]) => {
+              const isActive = activePreset === key;
+              return (
+                <button key={key} onClick={() => applyPreset(key)} title={p.hint} className={`rounded-2xl p-3 text-center border transition-all ${isActive ? 'bg-[#012b25] text-[#d9eb54] border-[#012b25] shadow-md' : 'bg-slate-50 text-[#012b25] border-slate-100 hover:bg-slate-100'}`}>
+                  <div className="text-xl mb-1">{p.emoji}</div>
+                  <div className="text-[11px] font-bold">{p.label}</div>
+                </button>
+              );
+            })}
+          </div>
+          {activePreset && <p className="text-[10px] text-emerald-600 mt-1.5 font-medium">✓ ใช้ preset: {PRESETS[activePreset].label} — {PRESETS[activePreset].hint}</p>}
         </div>
 
         <SliderRow label="🎬 V Reserve (Content คลิป)" value={vPct} setValue={setVPct} min={0} max={25} suffix="%" hint="คลิปสาระล้วน ไม่ขายสินค้า — แนะนำ 10%" />
