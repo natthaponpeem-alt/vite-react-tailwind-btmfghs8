@@ -308,35 +308,33 @@ function getUnfairAdvantage(products, clips) {
 }
 
 // ─── EXPLORE PIPELINE — สินค้าที่ไม่ Lock + น่าทดสอบ ──────────────────
-// รวมทั้ง classified (มี A/B/C/D) + ghost ที่มียอดขายแฝง
+// แยก 2 กลุ่ม: ghost (รอ Triage) + classified (พร้อมทดสอบ)
 function getExplorePipeline(products, clips, exploreBudget = 15) {
-  if (!Array.isArray(products)) return { candidates: [], totalWeight: 0, exploreBudget };
+  if (!Array.isArray(products)) return { ghosts: [], readyToTest: [], exploreBudget, totalGhosts: 0, totalReady: 0 };
   const list = products.filter(p => {
     if (p.locked) return false;
     if (p.decision === 'DROP') return false;
     const rg = getRecentGMV(p, clips);
-    return rg.best > 0 || !!p.category;  // มียอด หรือ ผ่าน triage แล้ว
+    return rg.best > 0 || !!p.category;
   });
   const scored = list.map(p => {
     const rg = getRecentGMV(p, clips);
     const commission = Number(p.scorecard?.commission) || 0;
     const isGhost = !p.category;
-    // ghost ใช้ commission default 10% เพราะยังไม่มีข้อมูล
     const effComm = commission > 0 ? commission : 10;
     const weight = rg.best * effComm / 100;
     return { p, weight, recentGMV: rg.best, commission, isGhost, fromLastMonth: rg.fromLastMonth };
   });
-  const totalWeight = scored.reduce((s, i) => s + i.weight, 0);
-  // เสนอคลิป = weight ratio × exploreBudget, min 2
-  scored.forEach(i => {
-    i.suggested = totalWeight > 0 ? Math.max(2, Math.round((i.weight / totalWeight) * exploreBudget)) : 2;
+  const allGhosts = scored.filter(i => i.isGhost).sort((a, b) => b.weight - a.weight);
+  const allReady = scored.filter(i => !i.isGhost).sort((a, b) => b.weight - a.weight);
+  const ghosts = allGhosts.slice(0, 4);
+  const readyToTest = allReady.slice(0, 5);
+  // suggested clips สำหรับ ready candidates
+  const totalReadyWeight = readyToTest.reduce((s, i) => s + i.weight, 0);
+  readyToTest.forEach(i => {
+    i.suggested = totalReadyWeight > 0 ? Math.max(2, Math.round((i.weight / totalReadyWeight) * exploreBudget)) : 2;
   });
-  // Sort: ghost with sales first (urgent), then by weight
-  scored.sort((a, b) => {
-    if (a.isGhost !== b.isGhost) return a.isGhost ? -1 : 1;
-    return b.weight - a.weight;
-  });
-  return { candidates: scored.slice(0, 6), totalWeight, exploreBudget };
+  return { ghosts, readyToTest, exploreBudget, totalGhosts: allGhosts.length, totalReady: allReady.length };
 }
 
 // ─── PHASE D — SMART QUOTA ALLOCATOR ───────────────────────────────────
@@ -1301,44 +1299,66 @@ function HomePage({ products, clips, lockedProducts, productsNeedingRescore, las
         </div>
       )}
 
-      {/* ─── TIER 2A2: EXPLORE PIPELINE (ตัวไม่ Lock + ghost น่าทดสอบ) ─── */}
-      {explorePipeline.candidates.length > 0 && (
-        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+      {/* ─── TIER 2A2: EXPLORE PIPELINE (2 sub-sections: ghosts + ready) ─── */}
+      {(explorePipeline.ghosts.length > 0 || explorePipeline.readyToTest.length > 0) && (
+        <div className="bg-white border border-[#e9eceb] rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h3 className="font-display text-base text-[#012b25] flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-600" /> Explore Pipeline</h3>
               <p className="text-[11px] text-slate-400 mt-0.5">สินค้าน่าทดสอบ — ใช้ budget Explore {explorePipeline.exploreBudget} คลิป</p>
             </div>
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">{explorePipeline.candidates.length} candidates</span>
           </div>
-          <div className="space-y-1.5">
-            {explorePipeline.candidates.map(item => {
-              const { p, recentGMV, commission, isGhost, suggested, fromLastMonth } = item;
-              const ci = isGhost ? { bg: 'bg-slate-300', short: '?' } : getAbcdInfo(p.category);
-              return (
-                <div key={p.id} className={`group flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all ${isGhost ? 'bg-sky-50/50 border-sky-100 hover:bg-sky-50' : 'bg-slate-50/40 border-slate-100 hover:bg-slate-50'}`}>
-                  <div className={`w-6 h-6 rounded-md ${ci.bg} text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0`}>{ci.short}</div>
-                  <button onClick={() => onSelectProduct(p.id)} className="flex-1 min-w-0 text-left">
-                    <div className="text-xs font-semibold text-[#012b25] truncate group-hover:text-emerald-800">{p.name}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                      ฿{fmtNum(recentGMV)}{commission > 0 && ` · คอม ${commission}%`}{fromLastMonth && <span className="text-amber-600 ml-1">📅 last month</span>}
-                    </div>
-                  </button>
-                  {isGhost ? (
-                    <span className="text-[10px] bg-sky-100 text-sky-700 font-bold px-2 py-0.5 rounded-md flex-shrink-0 whitespace-nowrap">🌱 ยังไม่ Triage</span>
-                  ) : (
-                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-md flex-shrink-0 whitespace-nowrap">เสนอ {suggested} คลิป</span>
-                  )}
-                  <button onClick={() => onPickToPost && onPickToPost(p.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1" title="ลงคลิป"><Plus className="w-3 h-3" /></button>
-                  {!isGhost && onUpdate && (
-                    <button onClick={async () => { await onUpdate(p.id, { locked: { targetClips: Number(appSettings?.defaultLockTarget) || 10, startedAt: new Date().toISOString(), anglesToTest: [] } }); if (showToast) showToast(`🔒 Lock: ${p.name?.slice(0,25)}`); }} className="bg-[#012b25] hover:bg-[#023831] text-[#d9eb54] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1" title="Lock product"><Lock className="w-3 h-3" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {explorePipeline.candidates.some(c => c.isGhost) && (
-            <p className="text-[10px] text-sky-700 mt-3 italic">💡 ตัว 🌱 ยังไม่ Triage — กด Triage Mode ใน Product Hub เพื่อจัดหมวดก่อน</p>
+
+          {/* Sub-section 1: 🌱 รอ Triage (ghosts) */}
+          {explorePipeline.ghosts.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-sky-700 uppercase font-bold tracking-wider">🌱 รอ Triage</div>
+                <span className="text-[10px] text-slate-400">{explorePipeline.ghosts.length}{explorePipeline.totalGhosts > explorePipeline.ghosts.length && `/${explorePipeline.totalGhosts}`}</span>
+              </div>
+              {explorePipeline.ghosts.map(item => {
+                const { p, recentGMV, commission, fromLastMonth } = item;
+                return (
+                  <div key={p.id} className="group flex items-center gap-2.5 px-3 py-2 rounded-xl border bg-sky-50/40 border-sky-100 hover:bg-sky-50 transition-all">
+                    <div className="w-6 h-6 rounded-md bg-slate-300 text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0">?</div>
+                    <button onClick={() => onSelectProduct(p.id)} className="flex-1 min-w-0 text-left">
+                      <div className="text-xs font-semibold text-[#012b25] truncate group-hover:text-sky-800">{p.name}</div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">฿{fmtNum(recentGMV)}{commission > 0 && ` · คอม ${commission}%`}{fromLastMonth && <span className="text-amber-600 ml-1">📅 last month</span>}</div>
+                    </button>
+                    <button onClick={() => onGoTo && onGoTo('products')} className="text-[10px] bg-sky-600 hover:bg-sky-700 text-white font-bold px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0">Triage →</button>
+                    <button onClick={() => onPickToPost && onPickToPost(p.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1" title="ลงคลิป"><Plus className="w-3 h-3" /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Sub-section 2: 🧪 พร้อมทดสอบ (classified non-locked) */}
+          {explorePipeline.readyToTest.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-emerald-700 uppercase font-bold tracking-wider">🧪 พร้อมทดสอบ</div>
+                <span className="text-[10px] text-slate-400">{explorePipeline.readyToTest.length}{explorePipeline.totalReady > explorePipeline.readyToTest.length && `/${explorePipeline.totalReady}`}</span>
+              </div>
+              {explorePipeline.readyToTest.map(item => {
+                const { p, recentGMV, commission, suggested, fromLastMonth } = item;
+                const ci = getAbcdInfo(p.category);
+                return (
+                  <div key={p.id} className="group flex items-center gap-2.5 px-3 py-2 rounded-xl border bg-slate-50/40 border-slate-100 hover:bg-slate-50 transition-all">
+                    <div className={`w-6 h-6 rounded-md ${ci.bg} text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0`}>{ci.short}</div>
+                    <button onClick={() => onSelectProduct(p.id)} className="flex-1 min-w-0 text-left">
+                      <div className="text-xs font-semibold text-[#012b25] truncate group-hover:text-emerald-800">{p.name}</div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">฿{fmtNum(recentGMV)}{commission > 0 && ` · คอม ${commission}%`}{fromLastMonth && <span className="text-amber-600 ml-1">📅 last month</span>}</div>
+                    </button>
+                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-md flex-shrink-0 whitespace-nowrap border border-emerald-100">เสนอ {suggested}</span>
+                    <button onClick={() => onPickToPost && onPickToPost(p.id)} className="bg-[#d9eb54] hover:bg-[#eaf96c] text-[#012b25] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1" title="ลงคลิป"><Plus className="w-3 h-3" /></button>
+                    {onUpdate && (
+                      <button onClick={async () => { await onUpdate(p.id, { locked: { targetClips: Number(appSettings?.defaultLockTarget) || 10, startedAt: new Date().toISOString(), anglesToTest: [] } }); if (showToast) showToast(`🔒 Lock: ${p.name?.slice(0,25)}`); }} className="bg-[#012b25] hover:bg-[#023831] text-[#d9eb54] font-bold text-[10px] px-2.5 py-1.5 rounded-lg shadow-sm flex-shrink-0 flex items-center gap-1" title="Lock product"><Lock className="w-3 h-3" /></button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
